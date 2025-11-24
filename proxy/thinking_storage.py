@@ -55,7 +55,7 @@ def store_thinking_blocks(messages: List[Dict[str, Any]], response: Dict[str, An
             block_type = block.get("type")
             if block_type in ("thinking", "redacted_thinking"):
                 thinking_blocks.append(block)
-                logger.debug(f"Stored {block_type} block")
+                logger.debug(f"Stored {block_type} block with keys: {block.keys()}")
 
     if thinking_blocks:
         conv_id = extract_conversation_id(messages)
@@ -68,7 +68,10 @@ def inject_thinking_blocks(messages: List[Dict[str, Any]]) -> List[Dict[str, Any
     conv_id = extract_conversation_id(messages)
     stored_blocks = _thinking_blocks_cache.get(conv_id, [])
 
+    # If no stored blocks, we can't fix the messages
+    # The client needs to preserve thinking blocks themselves
     if not stored_blocks:
+        logger.debug(f"No stored thinking blocks for conversation {conv_id[:8]}...")
         return messages
 
     updated_messages = []
@@ -79,19 +82,28 @@ def inject_thinking_blocks(messages: List[Dict[str, Any]]) -> List[Dict[str, Any
 
         content = message.get("content", [])
 
-        # Check if this assistant message already has thinking blocks
-        has_thinking = False
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") in ("thinking", "redacted_thinking"):
-                    has_thinking = True
-                    break
+        # Check if the first block is a thinking block
+        needs_thinking_prefix = False
+        if isinstance(content, list) and content:
+            first_block = content[0]
+            if isinstance(first_block, dict):
+                first_type = first_block.get("type")
+                # If first block is NOT thinking/redacted_thinking, we need to add one
+                if first_type not in ("thinking", "redacted_thinking"):
+                    needs_thinking_prefix = True
+                    logger.debug(f"Assistant message {i} starts with {first_type}, needs thinking prefix")
+        elif isinstance(content, str):
+            # String content always needs thinking prefix
+            needs_thinking_prefix = True
+        elif not content:
+            # Empty content needs thinking prefix
+            needs_thinking_prefix = True
 
-        if has_thinking:
-            # Already has thinking blocks, keep as is
+        if not needs_thinking_prefix:
+            # Already starts with thinking block, keep as is
             updated_messages.append(message)
         else:
-            # Need to inject stored thinking blocks
+            # Need to inject stored thinking blocks at the beginning
             new_message = message.copy()
 
             # Convert content to list if it's a string
