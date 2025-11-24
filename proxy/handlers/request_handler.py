@@ -10,6 +10,7 @@ from anthropic import (
     inject_claude_code_system_message,
     add_prompt_caching,
 )
+from anthropic.thinking_keywords import process_thinking_keywords
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,24 @@ def prepare_anthropic_request(
         anthropic_request = convert_openai_request_to_anthropic(openai_request)
     else:
         anthropic_request = openai_request.copy()
+
+    # Process thinking keywords in messages (detect, strip, and get config)
+    messages = anthropic_request.get("messages", [])
+    processed_messages, thinking_config = process_thinking_keywords(messages)
+
+    if thinking_config:
+        anthropic_request["messages"] = processed_messages
+        # Only set thinking if not already configured
+        if not anthropic_request.get("thinking"):
+            anthropic_request["thinking"] = thinking_config
+            logger.info(f"[{request_id}] Injected thinking config from keyword: {thinking_config}")
+        else:
+            # Update budget if keyword specifies higher budget
+            existing_budget = anthropic_request["thinking"].get("budget_tokens", 0)
+            keyword_budget = thinking_config.get("budget_tokens", 0)
+            if keyword_budget > existing_budget:
+                anthropic_request["thinking"]["budget_tokens"] = keyword_budget
+                logger.info(f"[{request_id}] Updated thinking budget from {existing_budget} to {keyword_budget}")
 
     # Ensure max_tokens is sufficient if thinking is enabled
     thinking = anthropic_request.get("thinking")
