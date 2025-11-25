@@ -58,6 +58,9 @@ THINKING_DEFAULT_BUDGET = config.get("THINKING_DEFAULT_BUDGET", 16000)
 # New default LLMux token locations
 TOKEN_FILE = config.get("TOKEN_FILE", str(Path.home() / ".llmux" / "tokens.json"))
 
+# API Keys storage
+API_KEYS_FILE = config.get("API_KEYS_FILE", str(Path.home() / ".llmux" / "api_keys.json"))
+
 # Headless mode configuration
 # Long-term OAuth token from environment (e.g., from claude setup-token)
 ANTHROPIC_OAUTH_TOKEN = os.getenv("ANTHROPIC_OAUTH_TOKEN", None)
