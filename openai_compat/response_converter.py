@@ -104,11 +104,16 @@ def convert_anthropic_response_to_openai(anthropic_response: Dict[str, Any], mod
         logger.debug(f"Extracted reasoning content: {len(reasoning_content)} chars, ~{reasoning_tokens} tokens")
 
     # Build OpenAI response
+    # Generate system_fingerprint from Anthropic message ID for compatibility
+    msg_id = anthropic_response.get('id', 'unknown')
+    system_fingerprint = f"fp_{msg_id.replace('msg_', '')[:12]}"
+
     openai_response = {
-        "id": f"chatcmpl-{anthropic_response.get('id', 'unknown').replace('msg_', '')}",
+        "id": f"chatcmpl-{msg_id.replace('msg_', '')}",
         "object": "chat.completion",
         "created": int(time.time()),
         "model": model,
+        "system_fingerprint": system_fingerprint,
         "choices": [
             {
                 "index": 0,
