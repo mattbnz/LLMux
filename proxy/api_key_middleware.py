@@ -87,23 +87,18 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
     def _extract_api_key(self, request: Request) -> str | None:
-        """Extract API key from request headers.
-
-        Accepts API keys from:
-        - Authorization: Bearer <key>
-        - X-API-Key: <key>
-        - x-api-key: <key> (Anthropic format used by LiteLLM)
-        """
+        """Extract API key from request headers"""
         # Check Authorization header first (Bearer token format)
         auth_header = request.headers.get("Authorization", "")
         if auth_header.lower().startswith("bearer "):
-            potential_key = auth_header[7:].strip()  # Remove "Bearer " prefix
-            if potential_key:
+            potential_key = auth_header[7:]  # Remove "Bearer " prefix
+            # Only use if it looks like our key format
+            if potential_key.startswith("llmux-"):
                 return potential_key
 
-        # Check X-API-Key header as alternative (case-insensitive)
+        # Check X-API-Key header as alternative
         x_api_key = request.headers.get("X-API-Key") or request.headers.get("x-api-key")
-        if x_api_key:
-            return x_api_key.strip()
+        if x_api_key and x_api_key.startswith("llmux-"):
+            return x_api_key
 
         return None
