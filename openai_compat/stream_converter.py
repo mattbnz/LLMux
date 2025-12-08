@@ -123,7 +123,6 @@ async def convert_anthropic_stream_to_openai(
                     message = data.get("message", {})
                     usage = message.get("usage", {})
                     if usage:
-                        nonlocal cached_tokens
                         cached_tokens = usage.get("cache_read_input_tokens", 0)
                         if cached_tokens > 0:
                             logger.debug(f"[{request_id}] Cache hit from message_start: {cached_tokens} tokens")
@@ -311,7 +310,6 @@ async def convert_anthropic_stream_to_openai(
                         if reasoning_text:
                             yield emit_reasoning(reasoning_text)
                             # Track reasoning character count for token estimation
-                            nonlocal reasoning_char_count
                             reasoning_char_count += len(reasoning_text)
                             # Accumulate full thinking text for later reattachment
                             acc = current_thinking_blocks.get(sse_index)
@@ -395,12 +393,10 @@ async def convert_anthropic_stream_to_openai(
                         input_tokens = usage.get("input_tokens", 0)
                         output_tokens = usage.get("output_tokens", 0)
                         # Also check for cache info in message_delta (may be provided here too)
-                        nonlocal cached_tokens
                         if usage.get("cache_read_input_tokens"):
                             cached_tokens = usage.get("cache_read_input_tokens", 0)
 
                         # Estimate reasoning tokens from accumulated character count
-                        nonlocal reasoning_char_count
                         reasoning_tokens = reasoning_char_count // 4 if reasoning_char_count > 0 else 0
 
                         final_usage = {
