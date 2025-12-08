@@ -88,17 +88,32 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 
     def _extract_api_key(self, request: Request) -> str | None:
         """Extract API key from request headers"""
-        # Check Authorization header first (Bearer token format)
+        # Get auth-related headers
         auth_header = request.headers.get("Authorization", "")
+        x_api_key = request.headers.get("X-API-Key") or request.headers.get("x-api-key")
+
+        # Debug: log what headers we received (truncated for security)
+        if auth_header:
+            logger.debug(f"Authorization header: {auth_header[:30]}...")
+        if x_api_key:
+            logger.debug(f"X-API-Key header: {x_api_key[:20]}...")
+        if not auth_header and not x_api_key:
+            logger.debug(f"No auth headers found. All headers: {list(request.headers.keys())}")
+
+        # Check Authorization header first (Bearer token format)
         if auth_header.lower().startswith("bearer "):
             potential_key = auth_header[7:]  # Remove "Bearer " prefix
             # Only use if it looks like our key format
             if potential_key.startswith("llmux-"):
                 return potential_key
+            else:
+                logger.debug(f"Bearer token doesn't start with 'llmux-': {potential_key[:15]}...")
 
         # Check X-API-Key header as alternative
-        x_api_key = request.headers.get("X-API-Key") or request.headers.get("x-api-key")
-        if x_api_key and x_api_key.startswith("llmux-"):
-            return x_api_key
+        if x_api_key:
+            if x_api_key.startswith("llmux-"):
+                return x_api_key
+            else:
+                logger.debug(f"X-API-Key doesn't start with 'llmux-': {x_api_key[:15]}...")
 
         return None
