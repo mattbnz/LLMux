@@ -183,7 +183,7 @@ async def anthropic_messages(request: AnthropicMessageRequest, raw_request: Requ
                         request_id,
                         anthropic_request,
                         access_token,
-                        all_betas,
+                        ",".join(all_betas) if all_betas else None,
                         tracer=tracer,
                     ):
                         yield chunk
@@ -199,7 +199,7 @@ async def anthropic_messages(request: AnthropicMessageRequest, raw_request: Requ
         else:
             # Handle non-streaming response
             logger.debug(f"[{request_id}] Making non-streaming request")
-            response = await make_anthropic_request(anthropic_request, access_token, all_betas)
+            response = await make_anthropic_request(anthropic_request, access_token, ",".join(all_betas) if all_betas else None)
 
             elapsed_ms = int((time.time() - start_time) * 1000)
             logger.info(f"[{request_id}] Anthropic request completed in {elapsed_ms}ms status={response.status_code}")
