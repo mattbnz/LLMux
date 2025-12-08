@@ -52,10 +52,10 @@ async def convert_anthropic_stream_to_openai(
     final_usage: Optional[Dict[str, Any]] = None
 
     # Track cached tokens from message_start (Anthropic includes cache info there)
-    cached_tokens: int = 0
+    cached_tokens = 0
 
     # Track reasoning character count for estimating reasoning tokens
-    reasoning_char_count: int = 0
+    reasoning_char_count = 0
 
     if tracer:
         tracer.log_note("starting OpenAI stream conversion")
