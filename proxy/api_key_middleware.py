@@ -6,7 +6,6 @@ Security features:
 - Uses timing-safe comparison via APIKeyStorage
 - Logs failed validation attempts (with partial key only)
 - Allows bypass for health/status endpoints
-- Backward compatible: if no keys configured, requests pass through
 """
 import logging
 from fastapi import Request
@@ -45,10 +44,6 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 
         # Only validate /v1/ API endpoints
         if not path.startswith("/v1/"):
-            return await call_next(request)
-
-        # Skip validation if no API keys are configured (backward compatible)
-        if not self.storage.has_keys():
             return await call_next(request)
 
         # Extract API key from headers
