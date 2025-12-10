@@ -22,3 +22,8 @@ class AnthropicMessageRequest(BaseModel):
     stream: Optional[bool] = False
     thinking: Optional[ThinkingParameter] = None
     tools: Optional[List[Dict[str, Any]]] = None
+    # Additional API parameters
+    stop_sequences: Optional[List[str]] = None
+    metadata: Optional[Dict[str, Any]] = None
+    service_tier: Optional[str] = None  # "auto" or "standard_only"
+    tool_choice: Optional[Dict[str, Any]] = None

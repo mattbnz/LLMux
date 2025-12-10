@@ -90,10 +90,17 @@ def convert_openai_tools_to_anthropic(openai_tools: Optional[List[Dict[str, Any]
             logger.debug(f"[TOOLS_SCHEMA]     - Parameters schema: {json.dumps(tool_parameters, indent=2)}")
 
             anthropic_tool = {
+                "type": "custom",
                 "name": tool_name,
                 "description": tool_description,
                 "input_schema": tool_parameters
             }
+
+            # Preserve cache_control if present in original tool or function
+            if "cache_control" in tool:
+                anthropic_tool["cache_control"] = tool["cache_control"]
+            elif "cache_control" in function:
+                anthropic_tool["cache_control"] = function["cache_control"]
 
             logger.debug(f"[TOOLS_SCHEMA]   - Converted to Anthropic tool: {json.dumps(anthropic_tool, indent=2)}")
             anthropic_tools.append(anthropic_tool)
@@ -112,10 +119,15 @@ def convert_openai_functions_to_anthropic(openai_functions: Optional[List[Dict[s
     anthropic_tools = []
 
     for func in openai_functions:
-        anthropic_tools.append({
+        anthropic_tool = {
+            "type": "custom",
             "name": func.get("name", ""),
             "description": func.get("description", ""),
             "input_schema": func.get("parameters", {})
-        })
+        }
+        # Preserve cache_control if present
+        if "cache_control" in func:
+            anthropic_tool["cache_control"] = func["cache_control"]
+        anthropic_tools.append(anthropic_tool)
 
     return anthropic_tools if anthropic_tools else None

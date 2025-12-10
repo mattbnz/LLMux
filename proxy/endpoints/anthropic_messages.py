@@ -17,6 +17,7 @@ from anthropic import (
     stream_anthropic_response,
 )
 from anthropic.thinking_keywords import process_thinking_keywords
+from anthropic.beta_headers import build_beta_headers
 from proxy.thinking_storage import inject_thinking_blocks
 from models.resolution import resolve_model_metadata
 from models.reasoning import REASONING_BUDGET_MAP
@@ -106,7 +107,7 @@ async def anthropic_messages(request: AnthropicMessageRequest, raw_request: Requ
     anthropic_request = inject_claude_code_system_message(anthropic_request)
 
     # Add cache_control to message content blocks for optimal caching
-    anthropic_request = add_prompt_caching(anthropic_request)
+    anthropic_request = add_prompt_caching(anthropic_request, ttl=settings.CACHE_TTL)
 
     # Enforce thinking budget for reasoning models
     if reasoning_level and reasoning_level in REASONING_BUDGET_MAP:
@@ -128,30 +129,18 @@ async def anthropic_messages(request: AnthropicMessageRequest, raw_request: Requ
                 anthropic_request["thinking"]["budget_tokens"] = required_budget
                 logger.debug(f"[{request_id}] Updated thinking budget from {existing_budget} to {required_budget} for reasoning level '{reasoning_level}'")
 
-    # Extract client beta headers
+    # Extract client beta headers and build consolidated beta header value
     client_beta_headers = headers_dict.get("anthropic-beta")
+    beta_header_value = build_beta_headers(
+        anthropic_request,
+        client_beta_headers=client_beta_headers,
+        request_id=request_id,
+        for_streaming=request.stream,
+        reasoning_level=reasoning_level,
+        use_1m_context=use_1m_context,
+    )
 
-    # Start with required base betas
-    required_betas = ["claude-code-20250219", "fine-grained-tool-streaming-2025-05-14"]
-
-    # Add interleaved-thinking beta for reasoning models
-    if reasoning_level:
-        required_betas.append("interleaved-thinking-2025-05-14")
-
-    # Add context-1m beta when use_1m_context is True
-    if use_1m_context:
-        required_betas.append("context-1m-2025-08-07")
-        logger.debug(f"[{request_id}] Adding context-1m beta header for 1M context model")
-
-    # Always include client-provided beta headers
-    if client_beta_headers:
-        client_betas = [beta.strip() for beta in client_beta_headers.split(",")]
-        # Combine required betas with client betas, preserving order and removing duplicates
-        all_betas = required_betas + [beta for beta in client_betas if beta not in required_betas]
-    else:
-        all_betas = required_betas
-
-    logger.debug(f"[{request_id}] FINAL ANTHROPIC REQUEST HEADERS: authorization=Bearer *****, anthropic-beta={','.join(all_betas)}, User-Agent=Claude-Code/1.0.0")
+    logger.debug(f"[{request_id}] FINAL ANTHROPIC REQUEST HEADERS: authorization=Bearer *****, anthropic-beta={beta_header_value}, User-Agent=Claude-Code/1.0.0")
     logger.debug(f"[{request_id}] SYSTEM MESSAGE STRUCTURE: {json.dumps(anthropic_request.get('system', []), indent=2)}")
     logger.debug(f"[{request_id}] FULL REQUEST COMPARISON - Our request structure:")
     logger.debug(f"[{request_id}] - model: {anthropic_request.get('model')}")
@@ -183,7 +172,7 @@ async def anthropic_messages(request: AnthropicMessageRequest, raw_request: Requ
                         request_id,
                         anthropic_request,
                         access_token,
-                        ",".join(all_betas) if all_betas else None,
+                        beta_header_value,
                         tracer=tracer,
                     ):
                         yield chunk
@@ -199,7 +188,7 @@ async def anthropic_messages(request: AnthropicMessageRequest, raw_request: Requ
         else:
             # Handle non-streaming response
             logger.debug(f"[{request_id}] Making non-streaming request")
-            response = await make_anthropic_request(anthropic_request, access_token, ",".join(all_betas) if all_betas else None)
+            response = await make_anthropic_request(anthropic_request, access_token, beta_header_value)
 
             elapsed_ms = int((time.time() - start_time) * 1000)
             logger.info(f"[{request_id}] Anthropic request completed in {elapsed_ms}ms status={response.status_code}")

@@ -18,7 +18,9 @@ def map_stop_reason_to_finish_reason(stop_reason: Optional[str]) -> str:
         "end_turn": "stop",
         "max_tokens": "length",
         "stop_sequence": "stop",
-        "tool_use": "tool_calls"
+        "tool_use": "tool_calls",
+        "pause_turn": "stop",           # Paused long-running turn
+        "refusal": "content_filter"     # Content policy refusal
     }
     return mapping.get(stop_reason, "stop")
 
@@ -86,6 +88,7 @@ def convert_anthropic_response_to_openai(anthropic_response: Dict[str, Any], mod
 
     # Map Anthropic's cache fields to OpenAI's prompt_tokens_details
     cached_tokens = usage_obj.get("cache_read_input_tokens", 0)
+    cache_creation_tokens = usage_obj.get("cache_creation_input_tokens", 0)
 
     # Estimate reasoning tokens if thinking content exists
     # Note: Anthropic's output_tokens already includes thinking tokens
@@ -103,6 +106,7 @@ def convert_anthropic_response_to_openai(anthropic_response: Dict[str, Any], mod
         "total_tokens": prompt_tokens + completion_tokens,
         "prompt_tokens_details": {
             "cached_tokens": cached_tokens,
+            "cache_creation_tokens": cache_creation_tokens,
             "audio_tokens": 0
         },
         "completion_tokens_details": {
@@ -115,6 +119,8 @@ def convert_anthropic_response_to_openai(anthropic_response: Dict[str, Any], mod
 
     if cached_tokens > 0:
         logger.debug(f"Cache hit: {cached_tokens} tokens read from cache")
+    if cache_creation_tokens > 0:
+        logger.debug(f"Cache write: {cache_creation_tokens} tokens written to cache")
 
     # Build OpenAI response
     # Generate system_fingerprint from Anthropic message ID for compatibility
@@ -136,6 +142,11 @@ def convert_anthropic_response_to_openai(anthropic_response: Dict[str, Any], mod
         ],
         "usage": usage
     }
+
+    # Include service_tier if present in Anthropic response
+    service_tier = usage_obj.get("service_tier")
+    if service_tier:
+        openai_response["service_tier"] = service_tier
 
     logger.debug(f"[RESPONSE_CONVERSION] Final OpenAI response: {json.dumps(openai_response, indent=2)}")
     logger.debug("[RESPONSE_CONVERSION] ===== END RESPONSE CONVERSION =====")

@@ -12,6 +12,7 @@ from anthropic import (
 )
 from anthropic.thinking_keywords import process_thinking_keywords
 from proxy.thinking_storage import inject_thinking_blocks
+import settings
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,6 @@ def prepare_anthropic_request(
     anthropic_request = inject_claude_code_system_message(anthropic_request)
 
     # Add cache_control to message content blocks for optimal caching
-    anthropic_request = add_prompt_caching(anthropic_request)
+    anthropic_request = add_prompt_caching(anthropic_request, ttl=settings.CACHE_TTL)
 
     return anthropic_request

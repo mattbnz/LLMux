@@ -53,6 +53,7 @@ async def convert_anthropic_stream_to_openai(
 
     # Track cached tokens from message_start (Anthropic includes cache info there)
     cached_tokens = 0
+    cache_creation_tokens = 0
 
     # Track reasoning character count for estimating reasoning tokens
     reasoning_char_count = 0
@@ -124,8 +125,11 @@ async def convert_anthropic_stream_to_openai(
                     usage = message.get("usage", {})
                     if usage:
                         cached_tokens = usage.get("cache_read_input_tokens", 0)
+                        cache_creation_tokens = usage.get("cache_creation_input_tokens", 0)
                         if cached_tokens > 0:
                             logger.debug(f"[{request_id}] Cache hit from message_start: {cached_tokens} tokens")
+                        if cache_creation_tokens > 0:
+                            logger.debug(f"[{request_id}] Cache write from message_start: {cache_creation_tokens} tokens")
 
                     initial_chunk = {
                         "id": completion_id,
@@ -215,6 +219,51 @@ async def convert_anthropic_stream_to_openai(
                                 "thinking": "",
                                 "signature": signature,
                             }
+                        continue
+
+                    if block_type == "server_tool_use":
+                        # Handle server-side tool use (e.g., web_search)
+                        sse_index = data.get("index")
+                        if sse_index is not None:
+                            logger.debug(f"[{request_id}] [STREAM_TOOL] Starting server_tool_use block at index {sse_index}")
+
+                            call_state = {
+                                "openai_index": next_tool_index,
+                                "id": content_block.get("id", ""),
+                                "name": content_block.get("name", ""),
+                                "arguments": json.dumps(content_block.get("input", {}))
+                            }
+                            tool_call_states[sse_index] = call_state
+                            next_tool_index += 1
+
+                            # Emit as regular tool call for OpenAI clients
+                            delta_chunk = {
+                                "id": completion_id,
+                                "object": "chat.completion.chunk",
+                                "created": created,
+                                "model": model,
+                                "system_fingerprint": system_fingerprint,
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {
+                                            "tool_calls": [
+                                                {
+                                                    "index": call_state["openai_index"],
+                                                    "id": call_state["id"],
+                                                    "type": "function",
+                                                    "function": {
+                                                        "name": call_state["name"],
+                                                        "arguments": call_state["arguments"]
+                                                    }
+                                                }
+                                            ]
+                                        },
+                                        "finish_reason": None
+                                    }
+                                ]
+                            }
+                            yield emit(delta_chunk)
                         continue
 
                 if data_type == "content_block_delta":
@@ -395,6 +444,8 @@ async def convert_anthropic_stream_to_openai(
                         # Also check for cache info in message_delta (may be provided here too)
                         if usage.get("cache_read_input_tokens"):
                             cached_tokens = usage.get("cache_read_input_tokens", 0)
+                        if usage.get("cache_creation_input_tokens"):
+                            cache_creation_tokens = usage.get("cache_creation_input_tokens", 0)
 
                         # Estimate reasoning tokens from accumulated character count
                         reasoning_tokens = reasoning_char_count // 4 if reasoning_char_count > 0 else 0
@@ -405,6 +456,7 @@ async def convert_anthropic_stream_to_openai(
                             "total_tokens": input_tokens + output_tokens,
                             "prompt_tokens_details": {
                                 "cached_tokens": cached_tokens,
+                                "cache_creation_tokens": cache_creation_tokens,
                                 "audio_tokens": 0
                             },
                             "completion_tokens_details": {
