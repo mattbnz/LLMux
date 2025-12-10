@@ -11,6 +11,39 @@ CORE_BETAS = [
     "claude-code-20250219",   # Claude Code features
 ]
 
+# Special Anthropic tool types that require the advanced-tool-use beta
+ADVANCED_TOOL_TYPES = [
+    "code_execution_20250825",          # Programmatic tool calling
+    "tool_search_tool_regex_20251119",  # Tool search (regex variant)
+    "tool_search_tool_bm25_20251119",   # Tool search (BM25 variant)
+]
+
+# Advanced tool properties that require the advanced-tool-use beta
+ADVANCED_TOOL_PROPERTIES = ["allowed_callers", "defer_loading", "input_examples"]
+
+# Memory tool type (requires context-management beta)
+MEMORY_TOOL_TYPE = "memory_20250818"
+
+
+def _has_advanced_tool_features(tools: List[Dict[str, Any]]) -> bool:
+    """Check if any tools require the advanced-tool-use beta."""
+    for tool in tools:
+        tool_type = tool.get("type")
+        if tool_type in ADVANCED_TOOL_TYPES:
+            return True
+        for prop in ADVANCED_TOOL_PROPERTIES:
+            if prop in tool:
+                return True
+    return False
+
+
+def _has_memory_tool(tools: List[Dict[str, Any]]) -> bool:
+    """Check if any tools are memory tools (require context-management beta)."""
+    for tool in tools:
+        if tool.get("type") == MEMORY_TOOL_TYPE:
+            return True
+    return False
+
 
 def build_beta_headers(
     anthropic_request: Dict[str, Any],
@@ -53,6 +86,28 @@ def build_beta_headers(
         required_betas.append("interleaved-thinking-2025-05-14")
         if request_id:
             logger.debug(f"[{request_id}] Adding interleaved-thinking beta (thinking enabled)")
+
+    # Add advanced-tool-use beta if advanced tool features detected
+    tools = anthropic_request.get("tools", [])
+    if tools and _has_advanced_tool_features(tools):
+        required_betas.append("advanced-tool-use-2025-11-20")
+        if request_id:
+            logger.debug(f"[{request_id}] Adding advanced-tool-use beta (advanced tool features detected)")
+
+    # Add effort beta if output_config.effort is specified (Opus 4.5 only)
+    output_config = anthropic_request.get("output_config")
+    if output_config and output_config.get("effort"):
+        required_betas.append("effort-2025-11-24")
+        if request_id:
+            logger.debug(f"[{request_id}] Adding effort beta (effort={output_config.get('effort')})")
+
+    # Add context-management beta if memory tool or context_management present
+    has_memory = tools and _has_memory_tool(tools)
+    has_context_mgmt = anthropic_request.get("context_management") is not None
+    if has_memory or has_context_mgmt:
+        required_betas.append("context-management-2025-06-27")
+        if request_id:
+            logger.debug(f"[{request_id}] Adding context-management beta (memory={has_memory}, context_mgmt={has_context_mgmt})")
 
     # Merge with client beta headers (preserve order, remove duplicates)
     if client_beta_headers:

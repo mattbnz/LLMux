@@ -20,7 +20,8 @@ def map_stop_reason_to_finish_reason(stop_reason: Optional[str]) -> str:
         "stop_sequence": "stop",
         "tool_use": "tool_calls",
         "pause_turn": "stop",           # Paused long-running turn
-        "refusal": "content_filter"     # Content policy refusal
+        "refusal": "content_filter",    # Content policy refusal
+        "model_context_window_exceeded": "length"  # Context window exceeded
     }
     return mapping.get(stop_reason, "stop")
 

@@ -121,4 +121,27 @@ def sanitize_anthropic_request(request_data: Dict[str, Any]) -> Dict[str, Any]:
             logger.debug(f"Removing invalid tool_choice (must be dict): {type(tc_val)}")
             del sanitized['tool_choice']
 
+    # Handle output_config - validate effort values (Opus 4.5 only)
+    if 'output_config' in sanitized:
+        oc_val = sanitized.get('output_config')
+        if oc_val is None:
+            logger.debug("Removing null output_config parameter")
+            del sanitized['output_config']
+        elif not isinstance(oc_val, dict):
+            logger.debug(f"Removing invalid output_config (must be dict): {type(oc_val)}")
+            del sanitized['output_config']
+        elif 'effort' in oc_val and oc_val['effort'] not in ('low', 'medium', 'high'):
+            logger.debug(f"Removing invalid output_config.effort value: {oc_val['effort']}")
+            del sanitized['output_config']
+
+    # Handle context_management - validate structure
+    if 'context_management' in sanitized:
+        cm_val = sanitized.get('context_management')
+        if cm_val is None:
+            logger.debug("Removing null context_management parameter")
+            del sanitized['context_management']
+        elif not isinstance(cm_val, dict):
+            logger.debug(f"Removing invalid context_management (must be dict): {type(cm_val)}")
+            del sanitized['context_management']
+
     return sanitized
