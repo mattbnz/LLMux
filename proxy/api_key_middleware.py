@@ -27,6 +27,18 @@ EXEMPT_PATHS = {
     "/redoc",
 }
 
+# Path prefixes that don't require API key authentication
+EXEMPT_PREFIXES = (
+    "/ui/",              # Web UI static files (auth handled by frontend)
+)
+
+# Management API paths that don't require authentication (OAuth callbacks)
+MANAGEMENT_EXEMPT_PATHS = {
+    "/api/management/auth/claude/callback",
+    "/api/management/auth/claude/callback-long-term",
+    "/api/management/auth/chatgpt/callback",
+}
+
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
     """Middleware to validate API keys on incoming requests"""
@@ -41,6 +53,18 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         # Skip exempt paths
         if path in EXEMPT_PATHS:
             return await call_next(request)
+
+        # Skip exempt prefixes (web UI static files)
+        if path.startswith(EXEMPT_PREFIXES):
+            return await call_next(request)
+
+        # Skip management OAuth callback paths (these need to work without auth)
+        if path in MANAGEMENT_EXEMPT_PATHS:
+            return await call_next(request)
+
+        # Validate management API endpoints with API key
+        if path.startswith("/api/management/"):
+            return await self._validate_management_request(request, call_next)
 
         # Only validate /v1/ API endpoints
         if not path.startswith("/v1/"):
@@ -79,6 +103,44 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         # Store key_id in request state for potential audit logging
         request.state.api_key_id = key_id
 
+        return await call_next(request)
+
+    async def _validate_management_request(self, request: Request, call_next):
+        """Validate management API requests with API key"""
+        path = request.url.path
+
+        # Extract API key from headers or query params (for OAuth redirects)
+        api_key = self._extract_api_key(request)
+
+        if not api_key:
+            logger.warning(f"Management API key validation failed: no key provided for {path}")
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": {
+                        "message": "API key required for management API. Provide Authorization: Bearer <key> or X-API-Key header.",
+                        "type": "authentication_error",
+                        "code": 401
+                    }
+                }
+            )
+
+        # Validate the key
+        key_id = self.storage.validate_key(api_key)
+        if not key_id:
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": {
+                        "message": "Invalid API key.",
+                        "type": "authentication_error",
+                        "code": 401
+                    }
+                }
+            )
+
+        # Store key_id in request state
+        request.state.api_key_id = key_id
         return await call_next(request)
 
     def _extract_api_key(self, request: Request) -> str | None:
