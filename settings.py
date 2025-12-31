@@ -65,6 +65,9 @@ TOKEN_FILE = config.get("TOKEN_FILE", str(Path.home() / ".llmux" / "tokens.json"
 # API Keys storage
 API_KEYS_FILE = config.get("API_KEYS_FILE", str(Path.home() / ".llmux" / "api_keys.json"))
 
+# Usage tracking database
+USAGE_DB_FILE = config.get("USAGE_DB_FILE", str(Path.home() / ".llmux" / "usage.db"))
+
 # Headless mode configuration
 # Long-term OAuth token from environment (e.g., from claude setup-token)
 ANTHROPIC_OAUTH_TOKEN = os.getenv("ANTHROPIC_OAUTH_TOKEN", None)

@@ -24,7 +24,9 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useApi, type APIKey, type CreateKeyResponse, type MessageResponse } from '@/hooks/use-api'
 import { toast } from 'sonner'
-import { Plus, Trash2, Copy, Check, KeyRound, Edit2, RefreshCw, Clock, Hash } from 'lucide-react'
+import { Plus, Trash2, Copy, Check, KeyRound, Edit2, RefreshCw, Clock, Hash, TrendingUp } from 'lucide-react'
+import { UsageSummaryBadge } from '@/components/UsageSummaryBadge'
+import { UsageDetailDialog } from '@/components/UsageDetailDialog'
 
 export default function Keys() {
   const { get, post, patch, del } = useApi()
@@ -38,6 +40,7 @@ export default function Keys() {
   const [editKey, setEditKey] = useState<APIKey | null>(null)
   const [editName, setEditName] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
+  const [usageDialogKey, setUsageDialogKey] = useState<APIKey | null>(null)
 
   const fetchKeys = async () => {
     setLoading(true)
@@ -261,11 +264,24 @@ export default function Keys() {
                         <Hash className="w-3.5 h-3.5" />
                         <span>{key.usage_count} requests</span>
                       </div>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <TrendingUp className="w-3.5 h-3.5 text-muted-foreground" />
+                        <UsageSummaryBadge keyId={key.id} />
+                      </div>
                     </div>
                     <div className="flex gap-1">
                       <Button
                         variant="ghost"
                         size="icon"
+                        title="View usage"
+                        onClick={() => setUsageDialogKey(key)}
+                      >
+                        <TrendingUp className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Rename"
                         onClick={() => { setEditKey(key); setEditName(key.name); }}
                       >
                         <Edit2 className="w-4 h-4" />
@@ -274,6 +290,7 @@ export default function Keys() {
                         variant="ghost"
                         size="icon"
                         className="text-destructive hover:text-destructive"
+                        title="Delete"
                         onClick={() => setDeleteKey(key)}
                       >
                         <Trash2 className="w-4 h-4" />
@@ -338,6 +355,14 @@ export default function Keys() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Usage Detail Dialog */}
+      <UsageDetailDialog
+        keyId={usageDialogKey?.id ?? null}
+        keyName={usageDialogKey?.name ?? null}
+        open={!!usageDialogKey}
+        onOpenChange={(open) => !open && setUsageDialogKey(null)}
+      />
     </div>
   )
 }

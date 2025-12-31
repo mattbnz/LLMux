@@ -25,6 +25,7 @@ from oauth import OAuthManager
 import settings
 from stream_debug import maybe_create_stream_tracer
 from ..logging_utils import log_request
+from utils.usage_recorder import record_request_usage
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -166,7 +167,18 @@ async def anthropic_messages(request: AnthropicMessageRequest, raw_request: Requ
                 max_bytes=settings.STREAM_TRACE_MAX_BYTES,
             )
 
+            # Variables to capture usage from streaming response
+            stream_usage = {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            }
+            api_key_id = getattr(raw_request.state, 'api_key_id', None)
+            stream_model = anthropic_request.get("model", "")
+
             async def raw_stream():
+                nonlocal stream_usage
                 try:
                     async for chunk in stream_anthropic_response(
                         request_id,
@@ -175,10 +187,40 @@ async def anthropic_messages(request: AnthropicMessageRequest, raw_request: Requ
                         beta_header_value,
                         tracer=tracer,
                     ):
+                        # Parse SSE chunk to extract usage from message_delta event
+                        if chunk and b'"usage"' in chunk:
+                            try:
+                                # Parse SSE format: data: {...}
+                                for line in chunk.decode('utf-8', errors='ignore').split('\n'):
+                                    if line.startswith('data: '):
+                                        data = json.loads(line[6:])
+                                        if data.get("type") == "message_delta":
+                                            usage = data.get("usage", {})
+                                            if usage.get("output_tokens"):
+                                                stream_usage["output_tokens"] = usage.get("output_tokens", 0)
+                                        elif data.get("type") == "message_start":
+                                            message = data.get("message", {})
+                                            usage = message.get("usage", {})
+                                            stream_usage["input_tokens"] = usage.get("input_tokens", 0)
+                                            stream_usage["cache_read_input_tokens"] = usage.get("cache_read_input_tokens", 0)
+                                            stream_usage["cache_creation_input_tokens"] = usage.get("cache_creation_input_tokens", 0)
+                            except (json.JSONDecodeError, UnicodeDecodeError):
+                                pass
                         yield chunk
                 finally:
                     if tracer:
                         tracer.close()
+                    # Record usage after stream completes
+                    if stream_usage["input_tokens"] > 0 or stream_usage["output_tokens"] > 0:
+                        record_request_usage(
+                            key_id=api_key_id,
+                            model=stream_model,
+                            input_tokens=stream_usage["input_tokens"],
+                            output_tokens=stream_usage["output_tokens"],
+                            cache_read_tokens=stream_usage["cache_read_input_tokens"],
+                            cache_creation_tokens=stream_usage["cache_creation_input_tokens"],
+                            request_id=request_id
+                        )
 
             return StreamingResponse(
                 raw_stream(),
@@ -215,6 +257,17 @@ async def anthropic_messages(request: AnthropicMessageRequest, raw_request: Requ
             output_tokens = usage_info.get("output_tokens", 0)
             total_tokens = input_tokens + output_tokens
             logger.debug(f"[{request_id}] [DEBUG] Response usage: input={input_tokens}, output={output_tokens}, total={total_tokens}")
+
+            # Record usage for tracking
+            record_request_usage(
+                key_id=getattr(raw_request.state, 'api_key_id', None),
+                model=anthropic_request.get("model", ""),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=usage_info.get("cache_read_input_tokens", 0),
+                cache_creation_tokens=usage_info.get("cache_creation_input_tokens", 0),
+                request_id=request_id
+            )
 
             logger.info(f"[{request_id}] ===== ANTHROPIC MESSAGES FINISHED ===== Total time: {final_elapsed_ms}ms")
             return anthropic_response

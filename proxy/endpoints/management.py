@@ -9,7 +9,7 @@ Provides endpoints for:
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -17,6 +17,8 @@ from pydantic import BaseModel
 
 from utils.api_key_storage import APIKeyStorage
 from utils.storage import TokenStorage
+from utils.usage_storage import UsageStorage
+from utils.pricing import calculate_cost, get_model_display_name
 from chatgpt_oauth.storage import ChatGPTTokenStorage
 from chatgpt_oauth.token_manager import ChatGPTOAuthManager
 from oauth.pkce import PKCEManager
@@ -99,6 +101,61 @@ class APIKeyResponse(BaseModel):
 class MessageResponse(BaseModel):
     message: str
     success: bool = True
+
+
+# ============================================================================
+# Usage Response Models
+# ============================================================================
+
+class UsageSummaryResponse(BaseModel):
+    key_id: str
+    total_input_tokens: int
+    total_output_tokens: int
+    total_cache_read_tokens: int
+    total_cache_creation_tokens: int
+    total_requests: int
+    estimated_cost_usd: float
+    first_usage: Optional[str] = None
+    last_usage: Optional[str] = None
+
+
+class UsageByModelResponse(BaseModel):
+    model: str
+    model_display_name: str
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_creation_tokens: int
+    request_count: int
+    estimated_cost_usd: float
+
+
+class HourlyUsageResponse(BaseModel):
+    timestamp: str
+    hour: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_creation_tokens: int
+    request_count: int
+    estimated_cost_usd: float
+
+
+class DailyUsageResponse(BaseModel):
+    date: str
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_creation_tokens: int
+    request_count: int
+    estimated_cost_usd: float
+
+
+class DetailedUsageResponse(BaseModel):
+    summary: UsageSummaryResponse
+    by_model: List[UsageByModelResponse]
+    hourly: List[HourlyUsageResponse]
+    daily: List[DailyUsageResponse]
 
 
 # ============================================================================
@@ -380,7 +437,7 @@ async def create_api_key(request: CreateKeyRequest):
 
 @router.delete("/keys/{key_id}", response_model=MessageResponse)
 async def delete_api_key(key_id: str):
-    """Delete an API key"""
+    """Delete an API key and its usage data"""
     storage = APIKeyStorage()
 
     if not storage.get_key_by_id(key_id):
@@ -389,6 +446,13 @@ async def delete_api_key(key_id: str):
     success = storage.delete_key(key_id)
 
     if success:
+        # Also delete usage data for this key
+        try:
+            usage_storage = UsageStorage()
+            usage_storage.delete_key_usage(key_id)
+        except Exception as e:
+            logger.warning(f"Failed to delete usage data for key {key_id}: {e}")
+
         return MessageResponse(message="API key deleted successfully")
     else:
         raise HTTPException(status_code=500, detail="Failed to delete API key")
@@ -417,5 +481,181 @@ async def rename_api_key(key_id: str, request: RenameKeyRequest):
         created_at=key_info["created_at"],
         last_used_at=key_info.get("last_used_at"),
         usage_count=key_info.get("usage_count", 0)
+    )
+
+
+# ============================================================================
+# Usage Tracking Endpoints
+# ============================================================================
+
+def _calculate_usage_cost(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0
+) -> float:
+    """Helper to calculate cost, defaulting model if empty."""
+    # Use a default model for cost calculation if none specified
+    effective_model = model if model else "claude-sonnet-4-5-20250929"
+    return calculate_cost(
+        effective_model,
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_creation_tokens
+    )
+
+
+@router.get("/keys/{key_id}/usage/summary", response_model=UsageSummaryResponse)
+async def get_key_usage_summary(key_id: str):
+    """Get usage summary for a specific API key"""
+    # Verify key exists
+    api_storage = APIKeyStorage()
+    if not api_storage.get_key_by_id(key_id):
+        raise HTTPException(status_code=404, detail="API key not found")
+
+    usage_storage = UsageStorage()
+    summary = usage_storage.get_usage_summary(key_id)
+
+    # Calculate total cost across all models
+    by_model = usage_storage.get_usage_by_model(key_id)
+    total_cost = sum(
+        _calculate_usage_cost(
+            m["model"],
+            m["input_tokens"],
+            m["output_tokens"],
+            m["cache_read_tokens"],
+            m["cache_creation_tokens"]
+        )
+        for m in by_model
+    )
+
+    return UsageSummaryResponse(
+        key_id=key_id,
+        total_input_tokens=summary["total_input_tokens"],
+        total_output_tokens=summary["total_output_tokens"],
+        total_cache_read_tokens=summary["total_cache_read_tokens"],
+        total_cache_creation_tokens=summary["total_cache_creation_tokens"],
+        total_requests=summary["total_requests"],
+        estimated_cost_usd=round(total_cost, 4),
+        first_usage=summary.get("first_usage"),
+        last_usage=summary.get("last_usage"),
+    )
+
+
+@router.get("/keys/{key_id}/usage", response_model=DetailedUsageResponse)
+async def get_key_usage_detailed(
+    key_id: str,
+    days: int = Query(default=30, ge=1, le=365),
+    hours: int = Query(default=24, ge=1, le=168),
+):
+    """Get detailed usage breakdown for a specific API key"""
+    # Verify key exists
+    api_storage = APIKeyStorage()
+    if not api_storage.get_key_by_id(key_id):
+        raise HTTPException(status_code=404, detail="API key not found")
+
+    usage_storage = UsageStorage()
+
+    # Get summary
+    summary_data = usage_storage.get_usage_summary(key_id)
+
+    # Get by-model breakdown
+    by_model_data = usage_storage.get_usage_by_model(key_id)
+
+    # Calculate total cost for summary
+    total_cost = sum(
+        _calculate_usage_cost(
+            m["model"],
+            m["input_tokens"],
+            m["output_tokens"],
+            m["cache_read_tokens"],
+            m["cache_creation_tokens"]
+        )
+        for m in by_model_data
+    )
+
+    summary = UsageSummaryResponse(
+        key_id=key_id,
+        total_input_tokens=summary_data["total_input_tokens"],
+        total_output_tokens=summary_data["total_output_tokens"],
+        total_cache_read_tokens=summary_data["total_cache_read_tokens"],
+        total_cache_creation_tokens=summary_data["total_cache_creation_tokens"],
+        total_requests=summary_data["total_requests"],
+        estimated_cost_usd=round(total_cost, 4),
+        first_usage=summary_data.get("first_usage"),
+        last_usage=summary_data.get("last_usage"),
+    )
+
+    # Convert by-model data
+    by_model = [
+        UsageByModelResponse(
+            model=m["model"],
+            model_display_name=get_model_display_name(m["model"]),
+            input_tokens=m["input_tokens"],
+            output_tokens=m["output_tokens"],
+            cache_read_tokens=m["cache_read_tokens"],
+            cache_creation_tokens=m["cache_creation_tokens"],
+            request_count=m["request_count"],
+            estimated_cost_usd=round(_calculate_usage_cost(
+                m["model"],
+                m["input_tokens"],
+                m["output_tokens"],
+                m["cache_read_tokens"],
+                m["cache_creation_tokens"]
+            ), 4)
+        )
+        for m in by_model_data
+    ]
+
+    # Get hourly usage
+    hourly_data = usage_storage.get_hourly_usage(key_id, hours=hours)
+    hourly = [
+        HourlyUsageResponse(
+            timestamp=h["timestamp"],
+            hour=h["hour"],
+            input_tokens=h["input_tokens"],
+            output_tokens=h["output_tokens"],
+            cache_read_tokens=h["cache_read_tokens"],
+            cache_creation_tokens=h["cache_creation_tokens"],
+            request_count=h["request_count"],
+            estimated_cost_usd=round(_calculate_usage_cost(
+                "",  # No model info for hourly aggregates
+                h["input_tokens"],
+                h["output_tokens"],
+                h["cache_read_tokens"],
+                h["cache_creation_tokens"]
+            ), 4)
+        )
+        for h in hourly_data
+    ]
+
+    # Get daily usage
+    daily_data = usage_storage.get_daily_usage(key_id, days=days)
+    daily = [
+        DailyUsageResponse(
+            date=d["date"],
+            input_tokens=d["input_tokens"],
+            output_tokens=d["output_tokens"],
+            cache_read_tokens=d["cache_read_tokens"],
+            cache_creation_tokens=d["cache_creation_tokens"],
+            request_count=d["request_count"],
+            estimated_cost_usd=round(_calculate_usage_cost(
+                "",  # No model info for daily aggregates
+                d["input_tokens"],
+                d["output_tokens"],
+                d["cache_read_tokens"],
+                d["cache_creation_tokens"]
+            ), 4)
+        )
+        for d in daily_data
+    ]
+
+    return DetailedUsageResponse(
+        summary=summary,
+        by_model=by_model,
+        hourly=hourly,
+        daily=daily,
     )
 

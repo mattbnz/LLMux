@@ -130,3 +130,55 @@ export interface MessageResponse {
   message: string
   success: boolean
 }
+
+// Usage tracking types
+export interface UsageSummary {
+  key_id: string
+  total_input_tokens: number
+  total_output_tokens: number
+  total_cache_read_tokens: number
+  total_cache_creation_tokens: number
+  total_requests: number
+  estimated_cost_usd: number
+  first_usage: string | null
+  last_usage: string | null
+}
+
+export interface UsageByModel {
+  model: string
+  model_display_name: string
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  request_count: number
+  estimated_cost_usd: number
+}
+
+export interface HourlyUsage {
+  timestamp: string
+  hour: number
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  request_count: number
+  estimated_cost_usd: number
+}
+
+export interface DailyUsage {
+  date: string
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  request_count: number
+  estimated_cost_usd: number
+}
+
+export interface DetailedUsage {
+  summary: UsageSummary
+  by_model: UsageByModel[]
+  hourly: HourlyUsage[]
+  daily: DailyUsage[]
+}

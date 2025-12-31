@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from oauth import OAuthManager
+from utils.usage_recorder import record_request_usage
 from models import is_custom_model, is_chatgpt_model, get_custom_model_config
 from chatgpt_oauth import ChatGPTOAuthManager
 from providers.chatgpt_provider import ChatGPTProvider
@@ -334,6 +335,22 @@ async def openai_chat_completions(request: OpenAIChatCompletionRequest, raw_requ
                 max_bytes=settings.STREAM_TRACE_MAX_BYTES,
             )
 
+            # Capture API key and model for usage callback
+            api_key_id = getattr(raw_request.state, 'api_key_id', None)
+            stream_model = anthropic_request.get("model", "")
+
+            def on_stream_usage(usage: dict):
+                """Callback to record usage after stream completes."""
+                record_request_usage(
+                    key_id=api_key_id,
+                    model=stream_model,
+                    input_tokens=usage.get("input_tokens", 0),
+                    output_tokens=usage.get("output_tokens", 0),
+                    cache_read_tokens=usage.get("cache_read_input_tokens", 0),
+                    cache_creation_tokens=usage.get("cache_creation_input_tokens", 0),
+                    request_id=request_id
+                )
+
             async def stream_with_conversion():
                 """Wrapper to convert Anthropic stream to OpenAI format"""
                 try:
@@ -345,6 +362,7 @@ async def openai_chat_completions(request: OpenAIChatCompletionRequest, raw_requ
                         request.model,
                         tracer=tracer,
                         include_usage=include_usage,
+                        usage_callback=on_stream_usage,
                     ):
                         yield chunk
                 finally:
@@ -404,6 +422,19 @@ async def openai_chat_completions(request: OpenAIChatCompletionRequest, raw_requ
             completion_tokens = usage_info.get("completion_tokens", 0)
             total_tokens = usage_info.get("total_tokens", 0)
             logger.debug(f"[{request_id}] [DEBUG] Response usage: prompt={prompt_tokens}, completion={completion_tokens}, total={total_tokens}")
+
+            # Record usage for tracking (use original Anthropic response for accurate token counts)
+            anthropic_usage = anthropic_response.get("usage", {})
+            prompt_details = usage_info.get("prompt_tokens_details", {})
+            record_request_usage(
+                key_id=getattr(raw_request.state, 'api_key_id', None),
+                model=anthropic_request.get("model", ""),
+                input_tokens=anthropic_usage.get("input_tokens", 0),
+                output_tokens=anthropic_usage.get("output_tokens", 0),
+                cache_read_tokens=anthropic_usage.get("cache_read_input_tokens", 0),
+                cache_creation_tokens=anthropic_usage.get("cache_creation_input_tokens", 0),
+                request_id=request_id
+            )
 
             logger.info(f"[{request_id}] ===== OPENAI CHAT COMPLETION FINISHED ===== Total time: {final_elapsed_ms}ms")
             return openai_response
