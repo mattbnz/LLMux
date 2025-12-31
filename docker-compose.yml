@@ -1,0 +1,27 @@
+services:
+  llmux:
+    build: .
+    container_name: llmux
+    restart: unless-stopped
+    environment:
+      # Required: Tailscale auth key
+      # Get one from: https://login.tailscale.com/admin/settings/keys
+      - TS_AUTHKEY=${TS_AUTHKEY}
+
+      # Required: Anthropic OAuth token for headless mode
+      # Or mount an existing tokens.json in the volume
+      - ANTHROPIC_OAUTH_TOKEN=${ANTHROPIC_OAUTH_TOKEN:-}
+
+      # Optional: Custom Tailscale hostname (default: llmux)
+      - TS_HOSTNAME=${TS_HOSTNAME:-llmux}
+
+      # Optional: Proxy configuration
+      - PORT=${PORT:-8081}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-claude-sonnet-4-5-20250929}
+    volumes:
+      # Persist tokens, API keys, usage data, and Tailscale state
+      - llmux-data:/data
+
+volumes:
+  llmux-data:

@@ -1,0 +1,76 @@
+# LLMux Systemd User Unit
+#
+# Installation:
+#   mkdir -p ~/.config/systemd/user
+#   cp llmux.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#
+# Configuration:
+#   Create ~/.config/llmux/env with your secrets:
+#     TS_AUTHKEY=tskey-auth-...
+#     ANTHROPIC_OAUTH_TOKEN=sk-ant-oat01-...
+#
+# Usage:
+#   systemctl --user enable llmux      # Enable on login
+#   systemctl --user start llmux       # Start now
+#   systemctl --user status llmux      # Check status
+#   journalctl --user -u llmux -f      # View logs
+#
+# To run without being logged in (optional):
+#   sudo loginctl enable-linger $USER
+
+[Unit]
+Description=LLMux - OpenAI-compatible AI Proxy with Tailscale
+Documentation=https://github.com/your-repo/llmux
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+
+# Environment file for secrets (TS_AUTHKEY, ANTHROPIC_OAUTH_TOKEN)
+EnvironmentFile=%h/.config/llmux/env
+
+# Optional configuration overrides
+Environment=TS_HOSTNAME=llmux
+Environment=PORT=8081
+Environment=LOG_LEVEL=info
+
+# Data directory for persistent storage
+Environment=LLMUX_DATA=%h/.local/share/llmux
+
+# Ensure data directory exists
+ExecStartPre=/bin/mkdir -p ${LLMUX_DATA}
+
+# Wait for Docker daemon to be available (system service)
+ExecStartPre=/bin/sh -c 'until /usr/bin/docker info >/dev/null 2>&1; do sleep 1; done'
+
+# Pull latest image (optional, comment out if using local build)
+# ExecStartPre=/usr/bin/docker pull ghcr.io/your-repo/llmux:latest
+
+# Remove any existing container
+ExecStartPre=-/usr/bin/docker rm -f llmux
+
+# Start the container
+ExecStart=/usr/bin/docker run \
+    --name llmux \
+    --rm \
+    -e TS_AUTHKEY=${TS_AUTHKEY} \
+    -e ANTHROPIC_OAUTH_TOKEN=${ANTHROPIC_OAUTH_TOKEN} \
+    -e TS_HOSTNAME=${TS_HOSTNAME} \
+    -e PORT=${PORT} \
+    -e LOG_LEVEL=${LOG_LEVEL} \
+    -v ${LLMUX_DATA}:/data \
+    llmux:latest
+
+# Stop the container gracefully
+ExecStop=/usr/bin/docker stop -t 30 llmux
+
+# Timeout settings
+TimeoutStartSec=120
+TimeoutStopSec=45
+
+[Install]
+WantedBy=default.target
