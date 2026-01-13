@@ -8,7 +8,6 @@
 # Configuration:
 #   Create ~/.config/llmux/env with your secrets:
 #     TS_AUTHKEY=tskey-auth-...
-#     ANTHROPIC_OAUTH_TOKEN=sk-ant-oat01-...
 #
 # Usage:
 #   systemctl --user enable llmux      # Enable on login
@@ -30,16 +29,9 @@ Type=simple
 Restart=always
 RestartSec=10
 
-# Environment file for secrets (TS_AUTHKEY, ANTHROPIC_OAUTH_TOKEN)
-EnvironmentFile=%h/.config/llmux/env
-
-# Optional configuration overrides
-Environment=TS_HOSTNAME=llmux
-Environment=PORT=8081
-Environment=LOG_LEVEL=info
-
-# Data directory for persistent storage
+# Data directory for persistent storage (needs systemd expansion)
 Environment=LLMUX_DATA=%h/.local/share/llmux
+Environment=LLMUX_ENV=%h/.config/llmux/env
 
 # Ensure data directory exists
 ExecStartPre=/bin/mkdir -p ${LLMUX_DATA}
@@ -57,11 +49,7 @@ ExecStartPre=-/usr/bin/docker rm -f llmux
 ExecStart=/usr/bin/docker run \
     --name llmux \
     --rm \
-    -e TS_AUTHKEY=${TS_AUTHKEY} \
-    -e ANTHROPIC_OAUTH_TOKEN=${ANTHROPIC_OAUTH_TOKEN} \
-    -e TS_HOSTNAME=${TS_HOSTNAME} \
-    -e PORT=${PORT} \
-    -e LOG_LEVEL=${LOG_LEVEL} \
+    --env-file ${LLMUX_ENV} \
     -v ${LLMUX_DATA}:/data \
     llmux:latest
 

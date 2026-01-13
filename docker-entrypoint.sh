@@ -166,9 +166,8 @@ if [ -n "${TS_URL}" ]; then
 fi
 
 # Check if we have authentication configured
-if [ -z "${ANTHROPIC_OAUTH_TOKEN}" ] && [ ! -f "${TOKEN_FILE}" ]; then
-    echo "WARNING: No ANTHROPIC_OAUTH_TOKEN set and no tokens.json found"
-    echo "The proxy will start but Claude requests will fail until authenticated"
+if [ ! -f "${TOKEN_FILE}" ]; then
+    echo "NOTE: No tokens.json found - authenticate via the web UI at https://${TS_URL}/ui/"
 fi
 
 # Start LLMux in headless mode
