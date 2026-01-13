@@ -72,7 +72,7 @@ export default function Login({ onLogin }: LoginProps) {
               Authentication Required
             </CardTitle>
             <CardDescription>
-              Enter your LLMux API key to access the management console.
+              Enter your LLMux API key, or access via Tailscale for automatic authentication.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">

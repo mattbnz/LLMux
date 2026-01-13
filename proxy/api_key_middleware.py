@@ -6,8 +6,10 @@ Security features:
 - Uses timing-safe comparison via APIKeyStorage
 - Logs failed validation attempts (with partial key only)
 - Allows bypass for health/status endpoints
+- Supports Tailscale identity headers for management API authentication
 """
 import logging
+import os
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -15,6 +17,9 @@ from starlette.responses import JSONResponse
 from utils.api_key_storage import APIKeyStorage
 
 logger = logging.getLogger(__name__)
+
+# Enable Tailscale header authentication (for requests via tailscale serve)
+TAILSCALE_AUTH_ENABLED = os.getenv("TAILSCALE_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # Endpoints that don't require API key authentication
 EXEMPT_PATHS = {
@@ -106,10 +111,19 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
     async def _validate_management_request(self, request: Request, call_next):
-        """Validate management API requests with API key"""
+        """Validate management API requests with API key or Tailscale identity"""
         path = request.url.path
 
-        # Extract API key from headers or query params (for OAuth redirects)
+        # Check for Tailscale identity headers first (if enabled)
+        if TAILSCALE_AUTH_ENABLED:
+            tailscale_user = self._extract_tailscale_identity(request)
+            if tailscale_user:
+                logger.debug(f"Tailscale auth for {path}: {tailscale_user['login']}")
+                request.state.tailscale_user = tailscale_user
+                request.state.api_key_id = f"tailscale:{tailscale_user['login']}"
+                return await call_next(request)
+
+        # Fall back to API key authentication
         api_key = self._extract_api_key(request)
 
         if not api_key:
@@ -174,3 +188,28 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                 logger.debug(f"X-API-Key doesn't start with 'llmux-': {x_api_key[:15]}...")
 
         return None
+
+    def _extract_tailscale_identity(self, request: Request) -> dict | None:
+        """Extract Tailscale identity from headers set by tailscale serve.
+
+        Tailscale serve adds these headers for tailnet traffic:
+        - Tailscale-User-Login: User's login (e.g., alice@example.com)
+        - Tailscale-User-Name: User's display name
+        - Tailscale-User-Profile-Pic: Profile picture URL (optional)
+
+        Returns dict with user info if headers present, None otherwise.
+        """
+        login = request.headers.get("Tailscale-User-Login")
+
+        if not login:
+            return None
+
+        # Decode RFC2047 "Q" encoding if present (for non-ASCII values)
+        name = request.headers.get("Tailscale-User-Name", "")
+        profile_pic = request.headers.get("Tailscale-User-Profile-Pic", "")
+
+        return {
+            "login": login,
+            "name": name,
+            "profile_pic": profile_pic,
+        }

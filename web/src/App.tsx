@@ -6,7 +6,7 @@ import Dashboard from '@/pages/Dashboard'
 import Auth from '@/pages/Auth'
 import Keys from '@/pages/Keys'
 import Login from '@/pages/Login'
-import { hasStoredApiKey, setStoredApiKey, useApi, type ServerStatus } from '@/hooks/use-api'
+import { setStoredApiKey, useApi, type ServerStatus } from '@/hooks/use-api'
 import { Server, KeyRound, Shield, LogOut } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -16,19 +16,20 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
 
   // Check authentication on mount
+  // Supports both Tailscale identity headers (via tailscale serve) and API keys
   useEffect(() => {
     const checkAuth = async () => {
-      if (!hasStoredApiKey()) {
-        setIsAuthenticated(false)
-        return
-      }
-
-      // Validate stored key
+      // Try to access the API - this will work if:
+      // 1. Tailscale identity headers are present (via tailscale serve), or
+      // 2. A valid API key is stored
       const { status } = await get<ServerStatus>('/server/status')
+
       if (status === 401) {
+        // Auth failed - clear any invalid stored key and show login
         setStoredApiKey(null)
         setIsAuthenticated(false)
       } else {
+        // Auth succeeded (either via Tailscale headers or stored API key)
         setIsAuthenticated(true)
       }
     }
