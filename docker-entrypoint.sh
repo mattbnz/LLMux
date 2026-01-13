@@ -81,6 +81,9 @@ set -a
 source "${ENV_FILE}"
 set +a
 
+# Symlink .env to app directory so ConfigLoader finds it
+ln -sf "${ENV_FILE}" /app/.env
+
 # Export storage paths for LLMux (ensure they're set even if .env was customized)
 export TOKEN_FILE="${TOKEN_FILE:-${LLMUX_DIR}/tokens.json}"
 export API_KEYS_FILE="${API_KEYS_FILE:-${LLMUX_DIR}/api_keys.json}"
@@ -89,6 +92,8 @@ export CHATGPT_TOKEN_FILE="${CHATGPT_TOKEN_FILE:-${LLMUX_DIR}/chatgpt/tokens.jso
 
 echo "Starting LLMux with Tailscale..."
 echo "  Data directory: ${DATA_DIR}"
+echo "  HOME: ${HOME}"
+echo "  TOKEN_FILE: ${TOKEN_FILE}"
 echo "  Tailscale hostname: ${TS_HOSTNAME}"
 echo "  Proxy port: ${PORT}"
 
@@ -96,16 +101,18 @@ echo "  Proxy port: ${PORT}"
 echo "Starting tailscaled daemon..."
 tailscaled \
     --state="${TS_STATE_DIR}/tailscaled.state" \
-    --socket="${TS_STATE_DIR}/tailscaled.sock" \
     --tun=userspace-networking \
     --socks5-server=localhost:1055 \
     --outbound-http-proxy-listen=localhost:1056 &
 
-# Wait for tailscaled to be ready
-sleep 2
-
-# Set socket path for tailscale CLI
-export TS_SOCKET="${TS_STATE_DIR}/tailscaled.sock"
+# Wait for tailscaled socket to be ready
+echo "Waiting for tailscaled to be ready..."
+for i in {1..30}; do
+    if [ -S /var/run/tailscale/tailscaled.sock ]; then
+        break
+    fi
+    sleep 0.5
+done
 
 # Authenticate with Tailscale
 if [ -n "${TS_AUTHKEY}" ]; then
@@ -124,8 +131,9 @@ fi
 # Wait for Tailscale to be connected
 echo "Waiting for Tailscale connection..."
 for i in {1..30}; do
-    if tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'; then
+    if tailscale ip -4 >/dev/null 2>&1; then
         echo "Tailscale connected!"
+        tailscale ip -4
         break
     fi
     if [ $i -eq 30 ]; then

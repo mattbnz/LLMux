@@ -32,17 +32,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY cli.py settings.py ./
-COPY cli/ ./cli/
-COPY proxy/ ./proxy/
-COPY openai_compat/ ./openai_compat/
-COPY anthropic/ ./anthropic/
-COPY providers/ ./providers/
-COPY oauth/ ./oauth/
-COPY chatgpt_oauth/ ./chatgpt_oauth/
-COPY config/ ./config/
-COPY utils/ ./utils/
+# Copy application code (everything except what's in .dockerignore)
+COPY . .
 
 # Copy built web UI from builder stage
 COPY --from=web-builder /app/web/dist ./web/dist
