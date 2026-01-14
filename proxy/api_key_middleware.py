@@ -200,7 +200,12 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
     def _extract_api_key(self, request: Request) -> str | None:
-        """Extract API key from request headers"""
+        """Extract API key from request headers.
+
+        Returns any key provided in Authorization (Bearer) or X-API-Key headers.
+        Keys don't need to start with 'llmux-' - arbitrary keys are allowed
+        for Tailscale auto-key creation (see docstring at module level).
+        """
         # Get auth-related headers
         auth_header = request.headers.get("Authorization", "")
         x_api_key = request.headers.get("X-API-Key") or request.headers.get("x-api-key")
@@ -215,19 +220,13 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 
         # Check Authorization header first (Bearer token format)
         if auth_header.lower().startswith("bearer "):
-            potential_key = auth_header[7:]  # Remove "Bearer " prefix
-            # Only use if it looks like our key format
-            if potential_key.startswith("llmux-"):
+            potential_key = auth_header[7:].strip()  # Remove "Bearer " prefix
+            if potential_key:
                 return potential_key
-            else:
-                logger.debug(f"Bearer token doesn't start with 'llmux-': {potential_key[:15]}...")
 
         # Check X-API-Key header as alternative
         if x_api_key:
-            if x_api_key.startswith("llmux-"):
-                return x_api_key
-            else:
-                logger.debug(f"X-API-Key doesn't start with 'llmux-': {x_api_key[:15]}...")
+            return x_api_key
 
         return None
 

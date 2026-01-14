@@ -22,11 +22,6 @@ export default function Login({ onLogin }: LoginProps) {
       return
     }
 
-    if (!apiKey.startsWith('llmux-')) {
-      toast.error('Invalid API key format. Keys should start with "llmux-"')
-      return
-    }
-
     setLoading(true)
 
     // Temporarily store the key to test it

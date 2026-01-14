@@ -161,7 +161,7 @@ All endpoints except OAuth callbacks require the `X-API-Key` header.
 
 ### Authentication errors
 - Create an API key via CLI if you haven't already
-- Ensure the key starts with `llmux-`
+- Keys created via CLI start with `llmux-`; Tailscale auto-created keys can have any format
 - Try logging out and back in
 - Check browser console for detailed errors
 

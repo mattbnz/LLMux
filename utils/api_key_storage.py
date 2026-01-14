@@ -154,9 +154,9 @@ class APIKeyStorage:
         Returns:
             key_id if valid, None if invalid
         """
-        # Quick format validation (not timing-sensitive, fails fast)
-        if not key or not key.startswith(KEY_PREFIX):
-            logger.warning("API key validation failed: invalid format")
+        # Quick validation for empty keys
+        if not key:
+            logger.warning("API key validation failed: no key provided")
             return None
 
         data = self._load_data()
