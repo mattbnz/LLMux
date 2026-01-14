@@ -7,6 +7,13 @@ Security features:
 - Logs failed validation attempts (with partial key only)
 - Allows bypass for health/status endpoints
 - Supports Tailscale identity headers for management API authentication
+
+Tailscale auto-key support for /v1/ endpoints:
+- Keys with names starting with "auto-" are only valid from Tailscale connections
+- When an unknown key is provided from a Tailscale connection, a new key is
+  automatically created with name format: auto-{tailscale_user}-{key}
+- This allows API clients on the tailnet to use any key value they choose,
+  which will be automatically registered on first use
 """
 import logging
 import os
@@ -91,24 +98,59 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                 }
             )
 
+        # Check for Tailscale identity (used for auto- key validation and dynamic creation)
+        tailscale_user = None
+        if TAILSCALE_AUTH_ENABLED:
+            tailscale_user = self._extract_tailscale_identity(request)
+
         # Validate the key (timing-safe comparison happens in storage)
         key_id = self.storage.validate_key(api_key)
-        if not key_id:
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "error": {
-                        "message": "Invalid API key.",
-                        "type": "authentication_error",
-                        "code": 401
-                    }
+
+        if key_id:
+            # Key exists - check if it's an auto- key that requires Tailscale
+            key_info = self.storage.get_key_by_id(key_id)
+            if key_info and key_info.get("name", "").startswith("auto-"):
+                # Auto-keys only work from Tailscale connections
+                if not tailscale_user:
+                    logger.warning(f"Auto-key used from non-Tailscale connection: key_id={key_id}")
+                    return JSONResponse(
+                        status_code=401,
+                        content={
+                            "error": {
+                                "message": "This API key is only valid when accessed via Tailscale.",
+                                "type": "authentication_error",
+                                "code": 401
+                            }
+                        }
+                    )
+                logger.debug(f"Auto-key validated via Tailscale: key_id={key_id}, user={tailscale_user['login']}")
+
+            # Store key_id in request state for potential audit logging
+            request.state.api_key_id = key_id
+            return await call_next(request)
+
+        # Key doesn't exist - check if we can auto-create it via Tailscale
+        if tailscale_user:
+            # Create new auto-key with format: auto-{tailscale_user}-{key}
+            key_name = f"auto-{tailscale_user['login']}-{api_key}"
+            key_id = self.storage.create_key_with_value(key_name, api_key)
+            logger.info(f"Auto-created API key via Tailscale: key_id={key_id}, user={tailscale_user['login']}")
+
+            request.state.api_key_id = key_id
+            request.state.tailscale_user = tailscale_user
+            return await call_next(request)
+
+        # No valid key and no Tailscale auth - reject
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": {
+                    "message": "Invalid API key.",
+                    "type": "authentication_error",
+                    "code": 401
                 }
-            )
-
-        # Store key_id in request state for potential audit logging
-        request.state.api_key_id = key_id
-
-        return await call_next(request)
+            }
+        )
 
     async def _validate_management_request(self, request: Request, call_next):
         """Validate management API requests with API key or Tailscale identity"""

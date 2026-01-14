@@ -112,6 +112,41 @@ class APIKeyStorage:
         logger.info(f"API key created: id={key_id}, name={name}")
         return key_id, plaintext_key
 
+    def create_key_with_value(self, name: str, key_value: str) -> str:
+        """
+        Create a new API key using a specific key value (for auto-created keys).
+
+        This is used for dynamically creating keys when a Tailscale-authenticated
+        request provides a key that doesn't exist yet.
+
+        Args:
+            name: Name for the key (should start with "auto-" for auto-created keys)
+            key_value: The plaintext key value to store
+
+        Returns:
+            key_id of the created key
+        """
+        key_id = self._generate_key_id()
+        salt = self._generate_salt()
+        key_hash = self._hash_key(key_value, salt)
+
+        # Load, update, save
+        data = self._load_data()
+        data["api_keys"][key_id] = {
+            "name": name,
+            "key_hash": key_hash,
+            "salt": base64.b64encode(salt).decode('ascii'),
+            "key_prefix": key_value[:KEY_PREFIX_DISPLAY_LENGTH],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "last_used_at": datetime.now(timezone.utc).isoformat(),
+            "usage_count": 1,
+            "auto_created": True,
+        }
+        self._save_data(data)
+
+        logger.info(f"API key auto-created: id={key_id}, name={name}")
+        return key_id
+
     def validate_key(self, key: str) -> Optional[str]:
         """
         Validate an API key using timing-safe comparison.
