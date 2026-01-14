@@ -188,10 +188,10 @@ async def anthropic_messages(request: AnthropicMessageRequest, raw_request: Requ
                         tracer=tracer,
                     ):
                         # Parse SSE chunk to extract usage from message_delta event
-                        if chunk and b'"usage"' in chunk:
+                        if chunk and '"usage"' in chunk:
                             try:
                                 # Parse SSE format: data: {...}
-                                for line in chunk.decode('utf-8', errors='ignore').split('\n'):
+                                for line in chunk.split('\n'):
                                     if line.startswith('data: '):
                                         data = json.loads(line[6:])
                                         if data.get("type") == "message_delta":
