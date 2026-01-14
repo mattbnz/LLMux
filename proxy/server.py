@@ -20,9 +20,31 @@ class ProxyServer:
         self.debug_sse = debug_sse
         self.bind_address = bind_address or BIND_ADDRESS
 
-        # Configure debug logging if enabled
+        # Configure logging based on LOG_LEVEL
+        self._setup_logging()
+
+        # Configure additional debug logging if enabled
         if debug:
             self._setup_debug_logging()
+
+    def _setup_logging(self):
+        """Setup basic logging configuration based on LOG_LEVEL setting"""
+        # Map string log level to logging constant
+        level_map = {
+            "debug": logging.DEBUG,
+            "info": logging.INFO,
+            "warning": logging.WARNING,
+            "error": logging.ERROR,
+            "critical": logging.CRITICAL,
+        }
+        level = level_map.get(LOG_LEVEL.lower(), logging.INFO)
+
+        # Configure root logger with basic format
+        logging.basicConfig(
+            level=level,
+            format='%(name)s - %(levelname)s - %(message)s',
+            force=True  # Override any existing configuration
+        )
 
     def _setup_debug_logging(self):
         """Setup debug logging for the proxy server"""
@@ -89,6 +111,3 @@ class ProxyServer:
         """Stop the proxy server"""
         if self.server:
             self.server.should_exit = True
-
-
-
