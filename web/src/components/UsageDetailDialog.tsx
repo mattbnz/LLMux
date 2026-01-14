@@ -160,7 +160,10 @@ export function UsageDetailDialog({
                     <tbody>
                       {usage.by_model.map((m) => (
                         <tr key={m.model} className="border-t">
-                          <td className="p-2 text-muted-foreground">{m.model_display_name}</td>
+                          <td className="p-2">
+                            <div>{m.model_display_name}</div>
+                            <div className="text-xs text-muted-foreground font-mono">{m.model}</div>
+                          </td>
                           <td className="p-2 text-right">{m.request_count.toLocaleString()}</td>
                           <td className="p-2 text-right">{formatTokens(m.input_tokens + m.output_tokens)}</td>
                           <td className="p-2 text-right">{formatCost(m.estimated_cost_usd)}</td>

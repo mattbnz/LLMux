@@ -182,3 +182,39 @@ export interface DetailedUsage {
   hourly: HourlyUsage[]
   daily: DailyUsage[]
 }
+
+// Overall Usage Types (Aggregated Across All Keys)
+export interface OverallUsageSummary {
+  total_input_tokens: number
+  total_output_tokens: number
+  total_cache_read_tokens: number
+  total_cache_creation_tokens: number
+  total_requests: number
+  estimated_cost_usd: number
+  first_usage: string | null
+  last_usage: string | null
+  unique_keys: number
+}
+
+export interface KeyUsageItem {
+  key_id: string
+  key_name: string
+  key_prefix: string
+  is_deleted: boolean
+  deleted_at: string | null
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  request_count: number
+  estimated_cost_usd: number
+  first_usage: string | null
+  last_usage: string | null
+}
+
+export interface OverallDetailedUsage {
+  summary: OverallUsageSummary
+  by_model: UsageByModel[]
+  by_key: KeyUsageItem[]
+  daily: DailyUsage[]
+}

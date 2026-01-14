@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button'
 import Dashboard from '@/pages/Dashboard'
 import Auth from '@/pages/Auth'
 import Keys from '@/pages/Keys'
+import Usage from '@/pages/Usage'
 import Login from '@/pages/Login'
 import { setStoredApiKey, useApi, type ServerStatus } from '@/hooks/use-api'
-import { Server, KeyRound, Shield, LogOut } from 'lucide-react'
+import { Server, KeyRound, Shield, LogOut, BarChart3 } from 'lucide-react'
 import { toast } from 'sonner'
 
 function App() {
@@ -124,6 +125,19 @@ function App() {
                   <KeyRound className="w-4 h-4" />
                   API Keys
                 </NavLink>
+                <NavLink
+                  to="/usage"
+                  className={({ isActive }) =>
+                    `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      isActive
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
+                    }`
+                  }
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  Usage
+                </NavLink>
               </nav>
 
               <div className="h-6 w-px bg-border" />
@@ -143,6 +157,7 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/auth" element={<Auth />} />
           <Route path="/keys" element={<Keys />} />
+          <Route path="/usage" element={<Usage />} />
         </Routes>
       </main>
 

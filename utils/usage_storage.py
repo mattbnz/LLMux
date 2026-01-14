@@ -82,6 +82,25 @@ class UsageStorage:
                 ON usage_hourly(key_id, hour_timestamp)
             """)
 
+            # Create archive table for deleted API key metadata
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS api_key_archive (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key_id TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    key_prefix TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    deleted_at TEXT NOT NULL,
+                    last_used_at TEXT,
+                    total_requests INTEGER DEFAULT 0
+                )
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_archive_key_id
+                ON api_key_archive(key_id)
+            """)
+
             conn.commit()
             logger.debug(f"Usage database initialized: {self.db_file}")
         finally:
@@ -372,5 +391,242 @@ class UsageStorage:
             conn.commit()
             logger.info(f"Deleted {deleted} usage records for key {key_id}")
             return deleted
+        finally:
+            conn.close()
+
+    # ========================================================================
+    # API Key Archive Methods
+    # ========================================================================
+
+    def archive_key(
+        self,
+        key_id: str,
+        name: str,
+        key_prefix: str,
+        created_at: str,
+        last_used_at: Optional[str],
+        usage_count: int
+    ) -> bool:
+        """Archive a deleted API key's metadata for historical tracking.
+
+        Does NOT delete usage data - preserves it for historical reporting.
+
+        Args:
+            key_id: The API key ID
+            name: The key name
+            key_prefix: The key prefix for display
+            created_at: When the key was created
+            last_used_at: Last usage timestamp
+            usage_count: Total request count
+
+        Returns:
+            True if archived successfully
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            now = self._get_current_iso()
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO api_key_archive (
+                    key_id, name, key_prefix, created_at,
+                    deleted_at, last_used_at, total_requests
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (key_id, name, key_prefix, created_at, now,
+                  last_used_at, usage_count))
+
+            conn.commit()
+            logger.info(f"Archived key metadata: {key_id} ({name})")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to archive key {key_id}: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def get_archived_key(self, key_id: str) -> Optional[Dict]:
+        """Get archived key metadata by ID.
+
+        Args:
+            key_id: The API key ID
+
+        Returns:
+            Dictionary with archived key metadata, or None if not found
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT key_id, name, key_prefix, created_at,
+                       deleted_at, last_used_at, total_requests
+                FROM api_key_archive WHERE key_id = ?
+            """, (key_id,))
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "key_id": row["key_id"],
+                    "name": row["name"],
+                    "key_prefix": row["key_prefix"],
+                    "created_at": row["created_at"],
+                    "deleted_at": row["deleted_at"],
+                    "last_used_at": row["last_used_at"],
+                    "total_requests": row["total_requests"]
+                }
+            return None
+        finally:
+            conn.close()
+
+    def list_archived_keys(self) -> List[Dict]:
+        """List all archived API keys.
+
+        Returns:
+            List of archived key metadata dictionaries
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT key_id, name, key_prefix, created_at,
+                       deleted_at, last_used_at, total_requests
+                FROM api_key_archive
+                ORDER BY deleted_at DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    # ========================================================================
+    # Overall Usage Methods (Aggregated Across All Keys)
+    # ========================================================================
+
+    def get_overall_usage_summary(self) -> Dict:
+        """Get aggregated usage summary across all API keys.
+
+        Returns:
+            Dictionary with total token counts, request count, and metadata
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    COALESCE(SUM(input_tokens), 0) as total_input_tokens,
+                    COALESCE(SUM(output_tokens), 0) as total_output_tokens,
+                    COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
+                    COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
+                    COALESCE(SUM(request_count), 0) as total_requests,
+                    MIN(created_at) as first_usage,
+                    MAX(updated_at) as last_usage,
+                    COUNT(DISTINCT key_id) as unique_keys
+                FROM usage_hourly
+            """)
+            row = cursor.fetchone()
+            return {
+                "total_input_tokens": row["total_input_tokens"],
+                "total_output_tokens": row["total_output_tokens"],
+                "total_cache_read_tokens": row["total_cache_read_tokens"],
+                "total_cache_creation_tokens": row["total_cache_creation_tokens"],
+                "total_requests": row["total_requests"],
+                "first_usage": row["first_usage"],
+                "last_usage": row["last_usage"],
+                "unique_keys": row["unique_keys"]
+            }
+        finally:
+            conn.close()
+
+    def get_overall_usage_by_model(self) -> List[Dict]:
+        """Get overall usage breakdown by model across all keys.
+
+        Returns:
+            List of per-model usage records
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    model,
+                    SUM(input_tokens) as input_tokens,
+                    SUM(output_tokens) as output_tokens,
+                    SUM(cache_read_tokens) as cache_read_tokens,
+                    SUM(cache_creation_tokens) as cache_creation_tokens,
+                    SUM(request_count) as request_count
+                FROM usage_hourly
+                GROUP BY model
+                ORDER BY request_count DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def get_overall_daily_usage(self, days: int = 30) -> List[Dict]:
+        """Get overall daily usage for all keys combined.
+
+        Args:
+            days: Number of days to retrieve (default 30)
+
+        Returns:
+            List of daily usage records
+        """
+        now = datetime.now(timezone.utc)
+        cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        cutoff_ts = int(cutoff.timestamp()) - (days * 86400)
+
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    (hour_timestamp / 86400) * 86400 as day_timestamp,
+                    SUM(input_tokens) as input_tokens,
+                    SUM(output_tokens) as output_tokens,
+                    SUM(cache_read_tokens) as cache_read_tokens,
+                    SUM(cache_creation_tokens) as cache_creation_tokens,
+                    SUM(request_count) as request_count
+                FROM usage_hourly
+                WHERE hour_timestamp >= ?
+                GROUP BY day_timestamp
+                ORDER BY day_timestamp ASC
+            """, (cutoff_ts,))
+
+            results = []
+            for row in cursor.fetchall():
+                ts = datetime.fromtimestamp(row["day_timestamp"], tz=timezone.utc)
+                results.append({
+                    "date": ts.strftime("%Y-%m-%d"),
+                    "input_tokens": row["input_tokens"],
+                    "output_tokens": row["output_tokens"],
+                    "cache_read_tokens": row["cache_read_tokens"],
+                    "cache_creation_tokens": row["cache_creation_tokens"],
+                    "request_count": row["request_count"],
+                })
+            return results
+        finally:
+            conn.close()
+
+    def get_usage_by_key(self) -> List[Dict]:
+        """Get usage breakdown by API key.
+
+        Returns:
+            List of per-key usage records
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT
+                    key_id,
+                    SUM(input_tokens) as input_tokens,
+                    SUM(output_tokens) as output_tokens,
+                    SUM(cache_read_tokens) as cache_read_tokens,
+                    SUM(cache_creation_tokens) as cache_creation_tokens,
+                    SUM(request_count) as request_count,
+                    MIN(created_at) as first_usage,
+                    MAX(updated_at) as last_usage
+                FROM usage_hourly
+                GROUP BY key_id
+                ORDER BY request_count DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()

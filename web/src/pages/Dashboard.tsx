@@ -1,28 +1,37 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { useApi, type ServerStatus, type AuthStatus } from '@/hooks/use-api'
+import { useApi, type ServerStatus, type AuthStatus, type OverallUsageSummary } from '@/hooks/use-api'
 import { toast } from 'sonner'
-import { Activity, Clock, Globe, Shield, Zap, RefreshCw } from 'lucide-react'
+import { Activity, Clock, Globe, Shield, Zap, RefreshCw, TrendingUp, DollarSign, Cpu, KeyRound } from 'lucide-react'
+
+function formatTokens(tokens: number): string {
+  if (tokens < 1000) return tokens.toString()
+  if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(1)}K`
+  return `${(tokens / 1_000_000).toFixed(2)}M`
+}
 
 export default function Dashboard() {
   const { get } = useApi()
   const [serverStatus, setServerStatus] = useState<ServerStatus | null>(null)
   const [claudeStatus, setClaudeStatus] = useState<AuthStatus | null>(null)
   const [chatgptStatus, setChatgptStatus] = useState<AuthStatus | null>(null)
+  const [usageSummary, setUsageSummary] = useState<OverallUsageSummary | null>(null)
   const [loading, setLoading] = useState(true)
 
   const fetchStatus = async () => {
     setLoading(true)
-    const [server, claude, chatgpt] = await Promise.all([
+    const [server, claude, chatgpt, usage] = await Promise.all([
       get<ServerStatus>('/server/status'),
       get<AuthStatus>('/auth/claude/status'),
       get<AuthStatus>('/auth/chatgpt/status'),
+      get<OverallUsageSummary>('/usage/summary'),
     ])
 
     if (server.data) setServerStatus(server.data)
     if (claude.data) setClaudeStatus(claude.data)
     if (chatgpt.data) setChatgptStatus(chatgpt.data)
+    if (usage.data) setUsageSummary(usage.data)
 
     if (server.error || claude.error || chatgpt.error) {
       toast.error('Failed to fetch status')
@@ -176,6 +185,61 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Overall Usage Summary Card */}
+      <Card className="border-primary/20">
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-primary/10">
+              <DollarSign className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <CardTitle>Usage Summary</CardTitle>
+              <CardDescription>Overall API usage and costs</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-4 gap-6">
+            <div className="flex items-center gap-3">
+              <Cpu className="w-4 h-4 text-muted-foreground" />
+              <div>
+                <p className="text-xs text-muted-foreground">Total Tokens</p>
+                <p className="font-mono text-sm">
+                  {usageSummary
+                    ? formatTokens(usageSummary.total_input_tokens + usageSummary.total_output_tokens)
+                    : '—'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <DollarSign className="w-4 h-4 text-muted-foreground" />
+              <div>
+                <p className="text-xs text-muted-foreground">Est. Cost</p>
+                <p className="font-mono text-sm">
+                  {usageSummary ? `$${usageSummary.estimated_cost_usd.toFixed(2)}` : '—'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <TrendingUp className="w-4 h-4 text-muted-foreground" />
+              <div>
+                <p className="text-xs text-muted-foreground">Requests</p>
+                <p className="font-mono text-sm">
+                  {usageSummary?.total_requests.toLocaleString() ?? '—'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <KeyRound className="w-4 h-4 text-muted-foreground" />
+              <div>
+                <p className="text-xs text-muted-foreground">Active Keys</p>
+                <p className="font-mono text-sm">{usageSummary?.unique_keys ?? '—'}</p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

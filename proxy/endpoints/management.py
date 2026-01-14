@@ -158,6 +158,42 @@ class DetailedUsageResponse(BaseModel):
     daily: List[DailyUsageResponse]
 
 
+# Overall Usage Response Models (Aggregated Across All Keys)
+class OverallUsageSummaryResponse(BaseModel):
+    total_input_tokens: int
+    total_output_tokens: int
+    total_cache_read_tokens: int
+    total_cache_creation_tokens: int
+    total_requests: int
+    estimated_cost_usd: float
+    first_usage: Optional[str] = None
+    last_usage: Optional[str] = None
+    unique_keys: int
+
+
+class KeyUsageItem(BaseModel):
+    key_id: str
+    key_name: str
+    key_prefix: str
+    is_deleted: bool
+    deleted_at: Optional[str] = None
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_creation_tokens: int
+    request_count: int
+    estimated_cost_usd: float
+    first_usage: Optional[str] = None
+    last_usage: Optional[str] = None
+
+
+class OverallDetailedUsageResponse(BaseModel):
+    summary: OverallUsageSummaryResponse
+    by_model: List[UsageByModelResponse]
+    by_key: List[KeyUsageItem]
+    daily: List[DailyUsageResponse]
+
+
 # ============================================================================
 # Server Control Endpoints
 # ============================================================================
@@ -437,22 +473,33 @@ async def create_api_key(request: CreateKeyRequest):
 
 @router.delete("/keys/{key_id}", response_model=MessageResponse)
 async def delete_api_key(key_id: str):
-    """Delete an API key and its usage data"""
+    """Delete an API key but preserve its usage data for historical tracking"""
     storage = APIKeyStorage()
 
-    if not storage.get_key_by_id(key_id):
+    key_info = storage.get_key_by_id(key_id)
+    if not key_info:
         raise HTTPException(status_code=404, detail="API key not found")
 
+    # Archive the key metadata BEFORE deleting from API key storage
+    # This preserves the key name and metadata for historical usage reporting
+    try:
+        usage_storage = UsageStorage()
+        usage_storage.archive_key(
+            key_id=key_id,
+            name=key_info["name"],
+            key_prefix=key_info["key_prefix"],
+            created_at=key_info["created_at"],
+            last_used_at=key_info.get("last_used_at"),
+            usage_count=key_info.get("usage_count", 0)
+        )
+    except Exception as e:
+        logger.warning(f"Failed to archive key metadata for {key_id}: {e}")
+
+    # Now delete the key from api_keys.json
+    # Note: We do NOT delete usage data - it's preserved for historical reporting
     success = storage.delete_key(key_id)
 
     if success:
-        # Also delete usage data for this key
-        try:
-            usage_storage = UsageStorage()
-            usage_storage.delete_key_usage(key_id)
-        except Exception as e:
-            logger.warning(f"Failed to delete usage data for key {key_id}: {e}")
-
         return MessageResponse(message="API key deleted successfully")
     else:
         raise HTTPException(status_code=500, detail="Failed to delete API key")
@@ -509,13 +556,16 @@ def _calculate_usage_cost(
 
 @router.get("/keys/{key_id}/usage/summary", response_model=UsageSummaryResponse)
 async def get_key_usage_summary(key_id: str):
-    """Get usage summary for a specific API key"""
-    # Verify key exists
+    """Get usage summary for a specific API key (active or deleted)"""
+    # Verify key exists (either active or archived)
     api_storage = APIKeyStorage()
-    if not api_storage.get_key_by_id(key_id):
-        raise HTTPException(status_code=404, detail="API key not found")
-
     usage_storage = UsageStorage()
+
+    key_exists = api_storage.get_key_by_id(key_id) is not None
+    archived_key = usage_storage.get_archived_key(key_id) if not key_exists else None
+
+    if not key_exists and not archived_key:
+        raise HTTPException(status_code=404, detail="API key not found")
     summary = usage_storage.get_usage_summary(key_id)
 
     # Calculate total cost across all models
@@ -550,13 +600,16 @@ async def get_key_usage_detailed(
     days: int = Query(default=30, ge=1, le=365),
     hours: int = Query(default=24, ge=1, le=168),
 ):
-    """Get detailed usage breakdown for a specific API key"""
-    # Verify key exists
+    """Get detailed usage breakdown for a specific API key (active or deleted)"""
+    # Verify key exists (either active or archived)
     api_storage = APIKeyStorage()
-    if not api_storage.get_key_by_id(key_id):
-        raise HTTPException(status_code=404, detail="API key not found")
-
     usage_storage = UsageStorage()
+
+    key_exists = api_storage.get_key_by_id(key_id) is not None
+    archived_key = usage_storage.get_archived_key(key_id) if not key_exists else None
+
+    if not key_exists and not archived_key:
+        raise HTTPException(status_code=404, detail="API key not found")
 
     # Get summary
     summary_data = usage_storage.get_usage_summary(key_id)
@@ -657,5 +710,197 @@ async def get_key_usage_detailed(
         by_model=by_model,
         hourly=hourly,
         daily=daily,
+    )
+
+
+# ============================================================================
+# Overall Usage Endpoints (Aggregated Across All Keys)
+# ============================================================================
+
+@router.get("/usage/summary", response_model=OverallUsageSummaryResponse)
+async def get_overall_usage_summary():
+    """Get aggregated usage summary across all API keys"""
+    usage_storage = UsageStorage()
+    summary = usage_storage.get_overall_usage_summary()
+
+    # Calculate total cost by model
+    by_model = usage_storage.get_overall_usage_by_model()
+    total_cost = sum(
+        _calculate_usage_cost(
+            m["model"],
+            m["input_tokens"],
+            m["output_tokens"],
+            m["cache_read_tokens"],
+            m["cache_creation_tokens"]
+        )
+        for m in by_model
+    )
+
+    return OverallUsageSummaryResponse(
+        total_input_tokens=summary["total_input_tokens"],
+        total_output_tokens=summary["total_output_tokens"],
+        total_cache_read_tokens=summary["total_cache_read_tokens"],
+        total_cache_creation_tokens=summary["total_cache_creation_tokens"],
+        total_requests=summary["total_requests"],
+        estimated_cost_usd=round(total_cost, 4),
+        first_usage=summary.get("first_usage"),
+        last_usage=summary.get("last_usage"),
+        unique_keys=summary.get("unique_keys", 0)
+    )
+
+
+@router.get("/usage", response_model=OverallDetailedUsageResponse)
+async def get_overall_usage_detailed(
+    days: int = Query(default=30, ge=1, le=365)
+):
+    """Get detailed overall usage breakdown including per-key usage"""
+    api_storage = APIKeyStorage()
+    usage_storage = UsageStorage()
+
+    # Get overall summary
+    summary_data = usage_storage.get_overall_usage_summary()
+
+    # Get by-model breakdown
+    by_model_data = usage_storage.get_overall_usage_by_model()
+
+    # Calculate total cost
+    total_cost = sum(
+        _calculate_usage_cost(
+            m["model"], m["input_tokens"], m["output_tokens"],
+            m["cache_read_tokens"], m["cache_creation_tokens"]
+        )
+        for m in by_model_data
+    )
+
+    summary = OverallUsageSummaryResponse(
+        total_input_tokens=summary_data["total_input_tokens"],
+        total_output_tokens=summary_data["total_output_tokens"],
+        total_cache_read_tokens=summary_data["total_cache_read_tokens"],
+        total_cache_creation_tokens=summary_data["total_cache_creation_tokens"],
+        total_requests=summary_data["total_requests"],
+        estimated_cost_usd=round(total_cost, 4),
+        first_usage=summary_data.get("first_usage"),
+        last_usage=summary_data.get("last_usage"),
+        unique_keys=summary_data.get("unique_keys", 0)
+    )
+
+    # Build by-model response, aggregating by display name
+    # (different model IDs like claude-sonnet-4-5-20250929 and variants
+    # should be grouped together under the same display name)
+    model_aggregates: Dict[str, Dict] = {}
+    for m in by_model_data:
+        display_name = get_model_display_name(m["model"])
+        if display_name not in model_aggregates:
+            model_aggregates[display_name] = {
+                "model": m["model"],
+                "model_display_name": display_name,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_creation_tokens": 0,
+                "request_count": 0,
+                "cost": 0.0,
+            }
+        agg = model_aggregates[display_name]
+        agg["input_tokens"] += m["input_tokens"]
+        agg["output_tokens"] += m["output_tokens"]
+        agg["cache_read_tokens"] += m["cache_read_tokens"]
+        agg["cache_creation_tokens"] += m["cache_creation_tokens"]
+        agg["request_count"] += m["request_count"]
+        agg["cost"] += _calculate_usage_cost(
+            m["model"], m["input_tokens"], m["output_tokens"],
+            m["cache_read_tokens"], m["cache_creation_tokens"]
+        )
+
+    by_model = [
+        UsageByModelResponse(
+            model=agg["model"],
+            model_display_name=agg["model_display_name"],
+            input_tokens=agg["input_tokens"],
+            output_tokens=agg["output_tokens"],
+            cache_read_tokens=agg["cache_read_tokens"],
+            cache_creation_tokens=agg["cache_creation_tokens"],
+            request_count=agg["request_count"],
+            estimated_cost_usd=round(agg["cost"], 4)
+        )
+        for agg in sorted(model_aggregates.values(), key=lambda x: x["request_count"], reverse=True)
+    ]
+
+    # Get usage by key with metadata enrichment
+    usage_by_key_data = usage_storage.get_usage_by_key()
+    active_keys = {k["id"]: k for k in api_storage.list_keys()}
+    archived_keys = {k["key_id"]: k for k in usage_storage.list_archived_keys()}
+
+    by_key = []
+    for usage in usage_by_key_data:
+        key_id = usage["key_id"]
+        is_deleted = key_id not in active_keys
+
+        # Get key metadata from active or archived
+        if key_id in active_keys:
+            key_info = active_keys[key_id]
+            key_name = key_info["name"]
+            key_prefix = key_info["key_prefix"]
+            deleted_at = None
+        elif key_id in archived_keys:
+            key_info = archived_keys[key_id]
+            key_name = key_info["name"]
+            key_prefix = key_info["key_prefix"]
+            deleted_at = key_info["deleted_at"]
+        else:
+            # Unknown key (orphaned usage data from before archival was implemented)
+            key_name = f"Unknown ({key_id[:8]})"
+            key_prefix = "???"
+            deleted_at = None
+
+        # Calculate cost for this key's usage
+        key_usage_by_model = usage_storage.get_usage_by_model(key_id)
+        key_cost = sum(
+            _calculate_usage_cost(
+                m["model"], m["input_tokens"], m["output_tokens"],
+                m["cache_read_tokens"], m["cache_creation_tokens"]
+            )
+            for m in key_usage_by_model
+        )
+
+        by_key.append(KeyUsageItem(
+            key_id=key_id,
+            key_name=key_name,
+            key_prefix=key_prefix,
+            is_deleted=is_deleted,
+            deleted_at=deleted_at,
+            input_tokens=usage["input_tokens"],
+            output_tokens=usage["output_tokens"],
+            cache_read_tokens=usage["cache_read_tokens"],
+            cache_creation_tokens=usage["cache_creation_tokens"],
+            request_count=usage["request_count"],
+            estimated_cost_usd=round(key_cost, 4),
+            first_usage=usage.get("first_usage"),
+            last_usage=usage.get("last_usage")
+        ))
+
+    # Get daily usage
+    daily_data = usage_storage.get_overall_daily_usage(days=days)
+    daily = [
+        DailyUsageResponse(
+            date=d["date"],
+            input_tokens=d["input_tokens"],
+            output_tokens=d["output_tokens"],
+            cache_read_tokens=d["cache_read_tokens"],
+            cache_creation_tokens=d["cache_creation_tokens"],
+            request_count=d["request_count"],
+            estimated_cost_usd=round(_calculate_usage_cost(
+                "", d["input_tokens"], d["output_tokens"],
+                d["cache_read_tokens"], d["cache_creation_tokens"]
+            ), 4)
+        )
+        for d in daily_data
+    ]
+
+    return OverallDetailedUsageResponse(
+        summary=summary,
+        by_model=by_model,
+        by_key=by_key,
+        daily=daily
     )
 
