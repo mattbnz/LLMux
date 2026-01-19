@@ -16,7 +16,6 @@ from anthropic import (
     make_anthropic_request,
     stream_anthropic_response,
 )
-from anthropic.thinking_keywords import process_thinking_keywords
 from anthropic.beta_headers import build_beta_headers
 from proxy.thinking_storage import inject_thinking_blocks
 from models.resolution import resolve_model_metadata
@@ -68,24 +67,6 @@ async def anthropic_messages(request: AnthropicMessageRequest, raw_request: Requ
         if resolved_model != original_model or reasoning_level or use_1m_context:
             logger.debug(f"[{request_id}] Model resolution: {original_model} -> {resolved_model}, "
                         f"reasoning={reasoning_level}, 1m_context={use_1m_context}")
-
-    # Process thinking keywords in messages (detect, strip, and get config)
-    messages = anthropic_request.get("messages", [])
-    processed_messages, thinking_config = process_thinking_keywords(messages)
-
-    if thinking_config:
-        anthropic_request["messages"] = processed_messages
-        # Only set thinking if not already configured
-        if not anthropic_request.get("thinking"):
-            anthropic_request["thinking"] = thinking_config
-            logger.info(f"[{request_id}] Injected thinking config from keyword: {thinking_config}")
-        else:
-            # Update budget if keyword specifies higher budget
-            existing_budget = anthropic_request["thinking"].get("budget_tokens", 0)
-            keyword_budget = thinking_config.get("budget_tokens", 0)
-            if keyword_budget > existing_budget:
-                anthropic_request["thinking"]["budget_tokens"] = keyword_budget
-                logger.info(f"[{request_id}] Updated thinking budget from {existing_budget} to {keyword_budget}")
 
     # Ensure max_tokens is sufficient if thinking is enabled
     thinking = anthropic_request.get("thinking")
