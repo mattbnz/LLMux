@@ -16,84 +16,18 @@ mkdir -p "${TS_STATE_DIR}"
 # Set HOME to data directory so LLMux stores tokens/keys in the volume
 export HOME="${DATA_DIR}"
 
-# Generate .env file in data volume if it doesn't exist
-ENV_FILE="${DATA_DIR}/.env"
-if [ ! -f "${ENV_FILE}" ]; then
-    echo "Creating .env file at ${ENV_FILE}..."
-    cat > "${ENV_FILE}" << EOF
-# LLMux Docker Configuration
-# This file is auto-generated on first run and persists in the data volume.
-# Edit this file to customize settings - changes persist across container restarts.
-
-# ============================================================================
-# SERVER CONFIGURATION
-# ============================================================================
-
-PORT=${PORT}
-LOG_LEVEL=${LOG_LEVEL:-info}
-BIND_ADDRESS=0.0.0.0
-
-# ============================================================================
-# MODEL CONFIGURATION
-# ============================================================================
-
-DEFAULT_MODEL=${DEFAULT_MODEL:-claude-sonnet-4-5-20250929}
-
-# ============================================================================
-# API TIMEOUT CONFIGURATION
-# ============================================================================
-
-CONNECT_TIMEOUT=${CONNECT_TIMEOUT:-10.0}
-READ_TIMEOUT=${READ_TIMEOUT:-60.0}
-REQUEST_TIMEOUT=${REQUEST_TIMEOUT:-120.0}
-STREAM_TIMEOUT=${STREAM_TIMEOUT:-600.0}
-
-# ============================================================================
-# STORAGE CONFIGURATION (paths inside container data volume)
-# ============================================================================
-
-TOKEN_FILE=${LLMUX_DIR}/tokens.json
-API_KEYS_FILE=${LLMUX_DIR}/api_keys.json
-USAGE_DB_FILE=${LLMUX_DIR}/usage.db
-CHATGPT_TOKEN_FILE=${LLMUX_DIR}/chatgpt/tokens.json
-
-# ============================================================================
-# DEBUG CONFIGURATION
-# ============================================================================
-
-STREAM_TRACE_ENABLED=false
-STREAM_TRACE_DIR=${DATA_DIR}/stream_traces
-STREAM_TRACE_MAX_BYTES=262144
-
-# ============================================================================
-# OAUTH TOKEN (for headless mode)
-# ============================================================================
-# Set via environment variable or uncomment and add your token here:
-# ANTHROPIC_OAUTH_TOKEN=sk-ant-oat01-...
-EOF
-    echo ".env file created"
-else
-    echo "Using existing .env file at ${ENV_FILE}"
-fi
-
-# Source the .env file to load any user customizations
-set -a
-source "${ENV_FILE}"
-set +a
-
-# Symlink .env to app directory so ConfigLoader finds it
-ln -sf "${ENV_FILE}" /app/.env
-
-# Export storage paths for LLMux (ensure they're set even if .env was customized)
-export TOKEN_FILE="${TOKEN_FILE:-${LLMUX_DIR}/tokens.json}"
-export API_KEYS_FILE="${API_KEYS_FILE:-${LLMUX_DIR}/api_keys.json}"
-export USAGE_DB_FILE="${USAGE_DB_FILE:-${LLMUX_DIR}/usage.db}"
-export CHATGPT_TOKEN_FILE="${CHATGPT_TOKEN_FILE:-${LLMUX_DIR}/chatgpt/tokens.json}"
+# Export storage paths for LLMux (point to data volume)
+export TOKEN_FILE="${LLMUX_DIR}/tokens.json"
+export API_KEYS_FILE="${LLMUX_DIR}/api_keys.json"
+export USAGE_DB_FILE="${LLMUX_DIR}/usage.db"
+export CHATGPT_TOKEN_FILE="${LLMUX_DIR}/chatgpt/tokens.json"
+export STREAM_TRACE_DIR="${DATA_DIR}/stream_traces"
 
 echo "Starting LLMux with Tailscale..."
 echo "  Data directory: ${DATA_DIR}"
 echo "  HOME: ${HOME}"
 echo "  TOKEN_FILE: ${TOKEN_FILE}"
+echo "  LOG_LEVEL: ${LOG_LEVEL:-info}"
 echo "  Tailscale hostname: ${TS_HOSTNAME}"
 echo "  Proxy port: ${PORT}"
 

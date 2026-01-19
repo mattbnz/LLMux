@@ -4,7 +4,8 @@ ProxyServer class for CLI control of the FastAPI application.
 import logging
 import uvicorn
 
-from settings import PORT, LOG_LEVEL, BIND_ADDRESS, STREAM_TRACE_ENABLED, STREAM_TRACE_DIR
+import settings
+from settings import PORT, BIND_ADDRESS, STREAM_TRACE_ENABLED, STREAM_TRACE_DIR
 from .app import app
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ class ProxyServer:
             "error": logging.ERROR,
             "critical": logging.CRITICAL,
         }
-        level = level_map.get(LOG_LEVEL.lower(), logging.INFO)
+        level = level_map.get(settings.LOG_LEVEL.lower(), logging.INFO)
 
         # Configure root logger with basic format
         logging.basicConfig(
@@ -101,7 +102,7 @@ class ProxyServer:
             app,
             host=self.bind_address,
             port=PORT,
-            log_level=LOG_LEVEL,
+            log_level=settings.LOG_LEVEL,
             access_log=False  # Reduce noise in CLI
         )
         self.server = uvicorn.Server(self.config)

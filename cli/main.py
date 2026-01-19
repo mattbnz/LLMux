@@ -48,6 +48,10 @@ def main():
 
     args = parser.parse_args()
 
+    # Set log level to debug if --debug flag is passed
+    if args.debug:
+        settings.LOG_LEVEL = "debug"
+
     # Determine stream tracing preference (config default -> CLI overrides)
     stream_trace_setting = settings.STREAM_TRACE_ENABLED
     if args.stream_trace is None:
