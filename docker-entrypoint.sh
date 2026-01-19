@@ -118,8 +118,10 @@ done
 tailscale status
 
 # Configure tailscale serve to expose the proxy
+# --accept-app-caps allows tagged devices with the capability to authenticate
+TS_APP_CAPABILITY="${TS_APP_CAPABILITY:-example.com/llmux}"
 echo "Configuring tailscale serve for port ${PORT}..."
-tailscale serve --bg --https=443 "http://localhost:${PORT}"
+tailscale serve --bg --https=443 --set-path=/ --accept-app-caps="${TS_APP_CAPABILITY}" "http://localhost:${PORT}"
 
 # Show the serve configuration
 echo "Tailscale serve configured:"

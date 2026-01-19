@@ -7,6 +7,7 @@ Security features:
 - Logs failed validation attempts (with partial key only)
 - Allows bypass for health/status endpoints
 - Supports Tailscale identity headers for management API authentication
+- Supports Tailscale app capabilities for tagged device authentication
 
 Tailscale auto-key support for /v1/ endpoints:
 - Keys with names starting with "auto-" are only valid from Tailscale connections
@@ -15,6 +16,7 @@ Tailscale auto-key support for /v1/ endpoints:
 - This allows API clients on the tailnet to use any key value they choose,
   which will be automatically registered on first use
 """
+import json
 import logging
 import os
 from fastapi import Request
@@ -27,6 +29,9 @@ logger = logging.getLogger(__name__)
 
 # Enable Tailscale header authentication (for requests via tailscale serve)
 TAILSCALE_AUTH_ENABLED = os.getenv("TAILSCALE_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
+
+# App capability that grants access (for tagged devices without user identity)
+TS_APP_CAPABILITY = os.getenv("TS_APP_CAPABILITY", "example.com/llmux")
 
 # Endpoints that don't require API key authentication
 EXEMPT_PATHS = {
@@ -237,20 +242,84 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         - Tailscale-User-Login: User's login (e.g., alice@example.com)
         - Tailscale-User-Name: User's display name
         - Tailscale-User-Profile-Pic: Profile picture URL (optional)
+        - Tailscale-App-Capabilities: JSON with granted app capabilities (for tagged devices)
 
         Returns dict with user info if headers present, None otherwise.
+        For tagged devices with app capabilities, uses tailscale whois to get the device's tags.
         """
         login = request.headers.get("Tailscale-User-Login")
 
-        if not login:
-            return None
+        if login:
+            # User identity available (not a tagged device)
+            name = request.headers.get("Tailscale-User-Name", "")
+            profile_pic = request.headers.get("Tailscale-User-Profile-Pic", "")
 
-        # Decode RFC2047 "Q" encoding if present (for non-ASCII values)
-        name = request.headers.get("Tailscale-User-Name", "")
-        profile_pic = request.headers.get("Tailscale-User-Profile-Pic", "")
+            return {
+                "login": login,
+                "name": name,
+                "profile_pic": profile_pic,
+            }
 
-        return {
-            "login": login,
-            "name": name,
-            "profile_pic": profile_pic,
-        }
+        # No user login - check for app capabilities (tagged devices)
+        if TS_APP_CAPABILITY:
+            caps_header = request.headers.get("Tailscale-App-Capabilities")
+            logger.debug(f"Tailscale auth check: User-Login={login}, App-Capabilities={caps_header[:100] if caps_header else None}")
+            if caps_header:
+                try:
+                    caps = json.loads(caps_header)
+                    # Check if the required capability is present
+                    if TS_APP_CAPABILITY in caps:
+                        logger.debug(f"Tailscale app capability matched: {TS_APP_CAPABILITY}")
+                        # Get the device's tags via tailscale whois
+                        tag_login = self._get_tailscale_tag(request)
+                        return {
+                            "login": tag_login,
+                            "name": "Tagged Device",
+                            "profile_pic": "",
+                        }
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse Tailscale-App-Capabilities header: {caps_header[:100]}")
+
+        return None
+
+    def _get_tailscale_tag(self, request: Request) -> str:
+        """Get the tag of the connecting device via Tailscale local API.
+
+        Returns the first tag (e.g., "github-runner") or a fallback identifier.
+        """
+        import httpx
+
+        # Get client IP - try X-Forwarded-For first (from tailscale serve), then fall back to client host
+        client_ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        if not client_ip:
+            client_ip = request.client.host if request.client else None
+
+        if not client_ip:
+            logger.warning("Could not determine client IP for tailscale whois")
+            return "tagged-device"
+
+        try:
+            # Query Tailscale local API via Unix socket
+            transport = httpx.HTTPTransport(uds="/var/run/tailscale/tailscaled.sock")
+            with httpx.Client(transport=transport, timeout=5) as client:
+                response = client.get(f"http://local-tailscaled.sock/localapi/v0/whois?addr={client_ip}")
+                response.raise_for_status()
+                whois_data = response.json()
+
+            # Tags are in Node.Tags
+            node = whois_data.get("Node", {})
+            tags = node.get("Tags", [])
+            if tags:
+                # Return first tag, stripping "tag:" prefix
+                tag = tags[0]
+                if tag.startswith("tag:"):
+                    tag = tag[4:]
+                return tag
+            # Fall back to hostname if no tags
+            hostname = node.get("ComputedName") or node.get("Name", "")
+            if hostname:
+                return f"node:{hostname}"
+        except Exception as e:
+            logger.warning(f"tailscale local API whois failed for {client_ip}: {e}")
+
+        return "tagged-device"
