@@ -19,6 +19,7 @@ Tailscale auto-key support for /v1/ endpoints:
 import json
 import logging
 import os
+import time
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -32,6 +33,9 @@ TAILSCALE_AUTH_ENABLED = os.getenv("TAILSCALE_AUTH_ENABLED", "true").lower() in 
 
 # App capability that grants access (for tagged devices without user identity)
 TS_APP_CAPABILITY = os.getenv("TS_APP_CAPABILITY", "example.com/llmux")
+
+# Cache TTL for Tailscale whois lookups (node tags change infrequently)
+TAILSCALE_WHOIS_CACHE_TTL = 600  # 10 minutes
 
 # Endpoints that don't require API key authentication
 EXEMPT_PATHS = {
@@ -63,6 +67,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
         super().__init__(app)
         self.storage = APIKeyStorage()
+        self._whois_cache: dict[str, tuple[str, float]] = {}  # ip -> (tag, expiry_time)
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -285,6 +290,9 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     def _get_tailscale_tag(self, request: Request) -> str:
         """Get the tag of the connecting device via Tailscale local API.
 
+        Results are cached for TAILSCALE_WHOIS_CACHE_TTL seconds since node
+        tags change infrequently.
+
         Returns the first tag (e.g., "github-runner") or a fallback identifier.
         """
         import httpx
@@ -298,6 +306,17 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             logger.warning("Could not determine client IP for tailscale whois")
             return "tagged-device"
 
+        # Check cache first
+        now = time.monotonic()
+        cached = self._whois_cache.get(client_ip)
+        if cached:
+            tag, expiry = cached
+            if now < expiry:
+                logger.debug(f"tailscale whois cache hit for {client_ip}: {tag}")
+                return tag
+            # Expired - remove from cache
+            del self._whois_cache[client_ip]
+
         try:
             # Query Tailscale local API via Unix socket
             transport = httpx.HTTPTransport(uds="/var/run/tailscale/tailscaled.sock")
@@ -309,16 +328,23 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             # Tags are in Node.Tags
             node = whois_data.get("Node", {})
             tags = node.get("Tags", [])
+            tag = None
             if tags:
                 # Return first tag, stripping "tag:" prefix
                 tag = tags[0]
                 if tag.startswith("tag:"):
                     tag = tag[4:]
+            else:
+                # Fall back to hostname if no tags
+                hostname = node.get("ComputedName") or node.get("Name", "")
+                if hostname:
+                    tag = f"node:{hostname}"
+
+            if tag:
+                # Cache the result
+                self._whois_cache[client_ip] = (tag, now + TAILSCALE_WHOIS_CACHE_TTL)
+                logger.debug(f"tailscale whois cached for {client_ip}: {tag}")
                 return tag
-            # Fall back to hostname if no tags
-            hostname = node.get("ComputedName") or node.get("Name", "")
-            if hostname:
-                return f"node:{hostname}"
         except Exception as e:
             logger.warning(f"tailscale local API whois failed for {client_ip}: {e}")
 
