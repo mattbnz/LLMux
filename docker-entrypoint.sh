@@ -116,15 +116,51 @@ done
 
 # Authenticate with Tailscale
 if [ -n "${TS_AUTHKEY}" ]; then
-    echo "Authenticating with Tailscale using auth key..."
+    # Static auth key method
+    echo "Authenticating with Tailscale using static auth key..."
     tailscale up \
         --authkey="${TS_AUTHKEY}" \
         --hostname="${TS_HOSTNAME}" \
         --accept-routes=false \
         --reset
+elif [ -n "${TS_CLIENT_ID}" ] && [ -n "${TS_AUD}" ] && [ -n "${TS_TAGS}" ]; then
+    # OIDC authentication via fly.io
+    echo "Authenticating with Tailscale using fly.io OIDC..."
+
+    # Check if fly.io API socket exists
+    if [ ! -S "/.fly/api" ]; then
+        echo "ERROR: fly.io API socket not found at /.fly/api"
+        echo "OIDC authentication is only available when running on fly.io"
+        exit 1
+    fi
+
+    # Fetch OIDC token from fly.io (returns raw JWT)
+    echo "Fetching OIDC token from fly.io..."
+    OIDC_TOKEN=$(curl --silent --fail --unix-socket /.fly/api \
+        -X POST "http://localhost/v1/tokens/oidc" \
+        --data "{\"aud\":\"${TS_AUD}\"}")
+
+    if [ -z "${OIDC_TOKEN}" ]; then
+        echo "ERROR: Failed to fetch OIDC token from fly.io"
+        exit 1
+    fi
+
+    echo "OIDC token obtained successfully"
+
+    # Authenticate with Tailscale using OIDC token
+    tailscale up \
+        --client-id="${TS_CLIENT_ID}" \
+        --id-token="${OIDC_TOKEN}" \
+        --advertise-tags="${TS_TAGS}" \
+        --hostname="${TS_HOSTNAME}" \
+        --accept-routes=false \
+        --reset
 else
-    echo "ERROR: TS_AUTHKEY environment variable is required"
-    echo "Get an auth key from: https://login.tailscale.com/admin/settings/keys"
+    echo "ERROR: Tailscale authentication not configured"
+    echo ""
+    echo "Configure one of the following:"
+    echo "  1. TS_AUTHKEY - Static auth key from https://login.tailscale.com/admin/settings/keys"
+    echo "  2. TS_CLIENT_ID, TS_AUD, and TS_TAGS - For fly.io OIDC authentication"
     exit 1
 fi
 
