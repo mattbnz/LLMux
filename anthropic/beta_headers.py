@@ -79,9 +79,9 @@ def build_beta_headers(
         if request_id:
             logger.debug(f"[{request_id}] Adding context-1m beta (1M context model variant requested)")
 
-    # Add thinking beta if enabled (either via request or reasoning_level)
+    # Add thinking beta if enabled/adaptive (either via request or reasoning_level)
     thinking = anthropic_request.get("thinking")
-    thinking_enabled = thinking and thinking.get("type") == "enabled"
+    thinking_enabled = thinking and thinking.get("type") in ("enabled", "adaptive")
     if thinking_enabled or reasoning_level:
         required_betas.append("interleaved-thinking-2025-05-14")
         if request_id:

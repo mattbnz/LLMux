@@ -61,18 +61,20 @@ def prepare_anthropic_request(
             anthropic_request["temperature"] = 0
             logger.debug(f"[{request_id}] Set temperature=0 for deterministic behavior")
 
-    # Ensure max_tokens is sufficient if thinking is enabled
+    # Ensure max_tokens is sufficient if thinking is enabled/adaptive
     thinking = anthropic_request.get("thinking")
-    if thinking and thinking.get("type") == "enabled":
-        thinking_budget = thinking.get("budget_tokens", 16000)
-        min_response_tokens = 1024
-        required_total = thinking_budget + min_response_tokens
-        if anthropic_request["max_tokens"] < required_total:
-            anthropic_request["max_tokens"] = required_total
-            logger.debug(
-                f"[{request_id}] Increased max_tokens to {required_total} "
-                f"(thinking: {thinking_budget} + response: {min_response_tokens})"
-            )
+    if thinking and thinking.get("type") in ("enabled", "adaptive"):
+        thinking_budget = thinking.get("budget_tokens")
+        if thinking_budget:
+            # Only adjust max_tokens when an explicit budget is set (type=enabled)
+            min_response_tokens = 1024
+            required_total = thinking_budget + min_response_tokens
+            if anthropic_request["max_tokens"] < required_total:
+                anthropic_request["max_tokens"] = required_total
+                logger.debug(
+                    f"[{request_id}] Increased max_tokens to {required_total} "
+                    f"(thinking: {thinking_budget} + response: {min_response_tokens})"
+                )
 
         # Inject stored thinking blocks from previous responses
         anthropic_request["messages"] = inject_thinking_blocks(anthropic_request["messages"])

@@ -5,9 +5,14 @@ from pydantic import BaseModel, Field
 
 
 class ThinkingParameter(BaseModel):
-    """Anthropic thinking/reasoning parameter"""
+    """Anthropic thinking/reasoning parameter
+
+    Supports two thinking types:
+    - "enabled": requires budget_tokens to set the thinking budget
+    - "adaptive": automatically determines budget (budget_tokens not permitted)
+    """
     type: str = Field(default="enabled")
-    budget_tokens: int = Field(default=16000)
+    budget_tokens: Optional[int] = Field(default=None)
 
 
 class OutputConfig(BaseModel):

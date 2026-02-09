@@ -60,12 +60,19 @@ def sanitize_anthropic_request(request_data: Dict[str, Any]) -> Dict[str, Any]:
     if thinking is None:
         logger.debug("Removing null thinking parameter (Anthropic API doesn't accept null values)")
         sanitized.pop('thinking', None)
-    elif thinking and thinking.get('type') == 'enabled':
-        logger.debug("Thinking enabled - applying Anthropic API constraints")
+    elif thinking and thinking.get('type') in ('enabled', 'adaptive'):
+        thinking_type = thinking['type']
+        logger.debug(f"Thinking {thinking_type} - applying Anthropic API constraints")
 
-        # Apply Anthropic thinking constraints
+        # Strip budget_tokens from adaptive thinking (not permitted by the API)
+        if thinking_type == 'adaptive' and 'budget_tokens' in thinking:
+            logger.debug("Removing budget_tokens from adaptive thinking (not permitted)")
+            del thinking['budget_tokens']
+            sanitized['thinking'] = thinking
+
+        # Apply Anthropic thinking constraints (same for enabled and adaptive)
         if 'temperature' in sanitized and sanitized['temperature'] is not None and sanitized['temperature'] != 1.0:
-            logger.debug(f"Adjusting temperature from {sanitized['temperature']} to 1.0 (thinking enabled)")
+            logger.debug(f"Adjusting temperature from {sanitized['temperature']} to 1.0 (thinking {thinking_type})")
             sanitized['temperature'] = 1.0
 
         if 'top_p' in sanitized and sanitized['top_p'] is not None and not (0.95 <= sanitized['top_p'] <= 1.0):
