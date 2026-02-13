@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { useApi, type OverallDetailedUsage, type KeyUsageItem } from '@/hooks/use-api'
+import { useApi, type OverallDetailedUsage, type KeyUsageItem, type OAuthUsageResponse } from '@/hooks/use-api'
 import { toast } from 'sonner'
 import { SimpleBarChart } from '@/components/SimpleBarChart'
 import { UsageDetailDialog } from '@/components/UsageDetailDialog'
+import { OAuthUsageBadges } from '@/components/OAuthUsageBadges'
 import {
   RefreshCw, TrendingUp, DollarSign, Cpu, Clock,
   KeyRound, Archive, CheckCircle, ExternalLink
@@ -25,16 +26,37 @@ function formatCost(cost: number): string {
 export default function Usage() {
   const { get } = useApi()
   const [usage, setUsage] = useState<OverallDetailedUsage | null>(null)
+  const [oauthUsage, setOAuthUsage] = useState<OAuthUsageResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedKey, setSelectedKey] = useState<KeyUsageItem | null>(null)
 
   const fetchUsage = async () => {
     setLoading(true)
-    const { data, error } = await get<OverallDetailedUsage>('/usage')
-    if (data) {
-      setUsage(data)
-    } else if (error) {
+
+    // Fetch OAuth usage separately as it's not under /api/management
+    const fetchOAuthUsage = async () => {
+      try {
+        const response = await fetch('/api/oauth/usage')
+        if (response.ok) {
+          return await response.json()
+        }
+      } catch (err) {
+        console.error('Failed to fetch OAuth usage:', err)
+      }
+      return null
+    }
+
+    const [usageResp, oauthUsageData] = await Promise.all([
+      get<OverallDetailedUsage>('/usage'),
+      fetchOAuthUsage()
+    ])
+    if (usageResp.data) {
+      setUsage(usageResp.data)
+    } else if (usageResp.error) {
       toast.error('Failed to fetch usage data')
+    }
+    if (oauthUsageData) {
+      setOAuthUsage(oauthUsageData)
     }
     setLoading(false)
   }
@@ -66,61 +88,83 @@ export default function Usage() {
         </div>
       ) : usage ? (
         <>
-          {/* Summary Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                  <Cpu className="w-4 h-4" />
-                  Total Tokens
+          {/* Usage Summary Card */}
+          <Card className="border-primary/20">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <DollarSign className="w-5 h-5 text-primary" />
                 </div>
-                <div className="text-2xl font-bold">{formatTokens(totalTokens)}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                  <DollarSign className="w-4 h-4" />
-                  Estimated Cost
+                <div>
+                  <CardTitle>Usage Summary</CardTitle>
+                  <CardDescription>Overall API usage and costs</CardDescription>
                 </div>
-                <div className="text-2xl font-bold">{formatCost(usage.summary.estimated_cost_usd)}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                  <TrendingUp className="w-4 h-4" />
-                  Total Requests
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* OAuth Usage Windows */}
+              {oauthUsage && (
+                <OAuthUsageBadges
+                  fiveHour={oauthUsage.five_hour}
+                  sevenDay={oauthUsage.seven_day}
+                  sevenDaySonnet={oauthUsage.seven_day_sonnet}
+                  extraUsage={oauthUsage.extra_usage}
+                />
+              )}
+
+              {/* Summary Stats */}
+              <div className="grid grid-cols-4 gap-6">
+                <div className="flex items-center gap-3">
+                  <Cpu className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">Total Tokens</p>
+                    <p className="font-mono text-sm">{formatTokens(totalTokens)}</p>
+                  </div>
                 </div>
-                <div className="text-2xl font-bold">{usage.summary.total_requests.toLocaleString()}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                  <Clock className="w-4 h-4" />
-                  Cache Savings
+                <div className="flex items-center gap-3">
+                  <DollarSign className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">Est. Cost</p>
+                    <p className="font-mono text-sm">${usage.summary.estimated_cost_usd.toFixed(2)}</p>
+                  </div>
                 </div>
-                <div className="text-2xl font-bold">{formatTokens(usage.summary.total_cache_read_tokens)}</div>
-              </CardContent>
-            </Card>
-          </div>
+                <div className="flex items-center gap-3">
+                  <TrendingUp className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">Requests</p>
+                    <p className="font-mono text-sm">{usage.summary.total_requests.toLocaleString()}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Clock className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">Cache Savings</p>
+                    <p className="font-mono text-sm">{formatTokens(usage.summary.total_cache_read_tokens)}</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Usage by API Key */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <KeyRound className="w-5 h-5" />
-                Usage by API Key
-              </CardTitle>
-              <CardDescription>
-                Breakdown of usage per API key including historical data
-              </CardDescription>
+          <Card className="border-primary/20">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <KeyRound className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <CardTitle>Usage by API Key</CardTitle>
+                  <CardDescription>
+                    Breakdown of usage per API key including historical data
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               {usage.by_key.length > 0 ? (
-                <div className="border rounded-lg overflow-hidden">
-                  <table className="w-full text-sm">
+                <div className="overflow-hidden">
+                  <table className="w-full text-xs">
                     <thead className="bg-muted/50">
                       <tr>
                         <th className="text-left p-3 font-medium">Key Name</th>
@@ -133,9 +177,9 @@ export default function Usage() {
                     </thead>
                     <tbody>
                       {usage.by_key.map((key) => (
-                        <tr key={key.key_id} className="border-t hover:bg-muted/30">
+                        <tr key={key.key_id} className="hover:bg-muted/30">
                           <td className="p-3">
-                            <div className="font-medium">{key.key_name}</div>
+                            <div className="font-medium text-xs">{key.key_name}</div>
                             <div className="text-xs text-muted-foreground font-mono">
                               {key.key_prefix}...
                             </div>
@@ -172,7 +216,7 @@ export default function Usage() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-7 px-2"
+                              className="h-7 px-2 text-xs"
                               onClick={() => setSelectedKey(key)}
                             >
                               <ExternalLink className="w-3.5 h-3.5 mr-1" />
@@ -185,7 +229,7 @@ export default function Usage() {
                   </table>
                 </div>
               ) : (
-                <div className="text-center py-8 text-muted-foreground">
+                <div className="text-center py-8 text-xs text-muted-foreground">
                   No usage data available
                 </div>
               )}
@@ -194,14 +238,21 @@ export default function Usage() {
 
           {/* Usage by Model */}
           {usage.by_model.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Usage by Model</CardTitle>
-                <CardDescription>Token usage breakdown by AI model</CardDescription>
+            <Card className="border-primary/20">
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-primary/10">
+                    <Cpu className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <CardTitle>Usage by Model</CardTitle>
+                    <CardDescription>Token usage breakdown by AI model</CardDescription>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="border rounded-lg overflow-hidden">
-                  <table className="w-full text-sm">
+                <div className="overflow-hidden">
+                  <table className="w-full text-xs">
                     <thead className="bg-muted/50">
                       <tr>
                         <th className="text-left p-3 font-medium">Model</th>
@@ -213,9 +264,9 @@ export default function Usage() {
                     </thead>
                     <tbody>
                       {usage.by_model.map((m) => (
-                        <tr key={m.model} className="border-t hover:bg-muted/30">
+                        <tr key={m.model} className="hover:bg-muted/30">
                           <td className="p-3">
-                            <div className="font-medium">{m.model_display_name}</div>
+                            <div className="font-medium text-xs">{m.model_display_name}</div>
                             <div className="text-xs text-muted-foreground font-mono">{m.model}</div>
                           </td>
                           <td className="p-3 text-right font-mono">{m.request_count.toLocaleString()}</td>
@@ -233,10 +284,17 @@ export default function Usage() {
 
           {/* Daily Usage Chart */}
           {usage.daily.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Daily Usage</CardTitle>
-                <CardDescription>Token usage over the last 30 days</CardDescription>
+            <Card className="border-primary/20">
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-primary/10">
+                    <TrendingUp className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <CardTitle>Daily Usage</CardTitle>
+                    <CardDescription>Token usage over the last 30 days</CardDescription>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent>
                 <SimpleBarChart

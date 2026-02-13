@@ -218,3 +218,27 @@ export interface OverallDetailedUsage {
   by_key: KeyUsageItem[]
   daily: DailyUsage[]
 }
+
+// OAuth Usage Types
+export interface UsageWindow {
+  utilization: number  // Percentage (0-100)
+  resets_at: string    // ISO timestamp
+}
+
+export interface ExtraUsage {
+  is_enabled: boolean
+  monthly_limit: number      // In cents
+  used_credits: number       // In cents
+  utilization: number | null // Percentage if available
+}
+
+export interface OAuthUsageResponse {
+  five_hour: UsageWindow | null
+  seven_day: UsageWindow | null
+  seven_day_oauth_apps: UsageWindow | null
+  seven_day_opus: UsageWindow | null
+  seven_day_sonnet: UsageWindow | null
+  seven_day_cowork: UsageWindow | null
+  iguana_necktie: UsageWindow | null
+  extra_usage: ExtraUsage | null
+}
