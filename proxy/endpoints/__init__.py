@@ -7,6 +7,7 @@ from .auth import router as auth_router
 from .anthropic_messages import router as anthropic_messages_router
 from .openai_chat import router as openai_chat_router
 from .management import router as management_router
+from .oauth_usage import router as oauth_usage_router
 
 __all__ = [
     'health_router',
@@ -15,5 +16,6 @@ __all__ = [
     'anthropic_messages_router',
     'openai_chat_router',
     'management_router',
+    'oauth_usage_router',
 ]
 

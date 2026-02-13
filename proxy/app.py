@@ -17,6 +17,7 @@ from .endpoints import (
     anthropic_messages_router,
     openai_chat_router,
     management_router,
+    oauth_usage_router,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ app.include_router(auth_router)
 app.include_router(anthropic_messages_router)
 app.include_router(openai_chat_router)
 app.include_router(management_router)
+app.include_router(oauth_usage_router)
 
 # Mount static files for web UI (if built)
 # For SPA routing, we need to:
