@@ -12,13 +12,19 @@ interface UsageStatus {
 }
 
 // Calculate time remaining from reset timestamp
-function getTimeRemaining(resetAt: string): { formatted: string; percentElapsed: number; totalMs: number } {
+function getTimeRemaining(resetAt: string | null | undefined): { formatted: string; percentElapsed: number; totalMs: number; isActive: boolean } {
+  // Check if resetAt is absent or empty
+  if (!resetAt) {
+    return { formatted: 'No session', percentElapsed: 100, totalMs: 0, isActive: false }
+  }
+
   const now = new Date()
   const reset = new Date(resetAt)
   const msRemaining = reset.getTime() - now.getTime()
 
+  // Check if resetAt is in the past
   if (msRemaining <= 0) {
-    return { formatted: 'Expired', percentElapsed: 100, totalMs: 0 }
+    return { formatted: 'No session', percentElapsed: 100, totalMs: 0, isActive: false }
   }
 
   const days = Math.floor(msRemaining / (1000 * 60 * 60 * 24))
@@ -37,21 +43,22 @@ function getTimeRemaining(resetAt: string): { formatted: string; percentElapsed:
   // For percent elapsed, we need to know the window duration
   // We'll estimate based on typical windows (5h, 7d)
   // This will be refined per-window type
-  return { formatted, percentElapsed: 0, totalMs: msRemaining }
+  return { formatted, percentElapsed: 0, totalMs: msRemaining, isActive: true }
 }
 
 // Calculate status based on utilization vs time progression
 function calculateStatus(
   utilization: number,
-  resetAt: string,
+  resetAt: string | null | undefined,
   windowDurationMs: number
 ): UsageStatus {
-  if (utilization >= 100) {
+  // Check if session is active
+  if (!resetAt) {
     return {
-      level: 'red',
-      emoji: '🔴',
-      color: 'text-red-600',
-      bgColor: 'bg-red-500/10'
+      level: 'gray',
+      emoji: '💤',
+      color: 'text-muted-foreground',
+      bgColor: 'bg-muted'
     }
   }
 
@@ -62,9 +69,18 @@ function calculateStatus(
   if (msRemaining <= 0) {
     return {
       level: 'gray',
-      emoji: '⏰',
+      emoji: '💤',
       color: 'text-muted-foreground',
       bgColor: 'bg-muted'
+    }
+  }
+
+  if (utilization >= 100) {
+    return {
+      level: 'red',
+      emoji: '🔴',
+      color: 'text-red-600',
+      bgColor: 'bg-red-500/10'
     }
   }
 
@@ -171,8 +187,14 @@ function UsageBadge({ label, window, windowDurationMs, compact = false }: UsageB
           {label}
         </div>
         <div className="flex items-center gap-2">
-          <div className="text-xl font-bold">{window.utilization.toFixed(0)}%</div>
-          <div className="text-xs text-muted-foreground">{timeRemaining.formatted}</div>
+          {timeRemaining.isActive ? (
+            <>
+              <div className="text-xl font-bold">{window.utilization.toFixed(0)}%</div>
+              <div className="text-xs text-muted-foreground">{timeRemaining.formatted}</div>
+            </>
+          ) : (
+            <div className="text-sm text-muted-foreground">No session active</div>
+          )}
           <span className="text-base ml-auto">{status.emoji}</span>
         </div>
       </Card>
@@ -184,7 +206,13 @@ function UsageBadge({ label, window, windowDurationMs, compact = false }: UsageB
       <div>
         <p className="text-xs text-muted-foreground">{label}</p>
         <p className="font-mono text-sm">
-          {window.utilization.toFixed(0)}% · {timeRemaining.formatted} remaining{' '}
+          {timeRemaining.isActive ? (
+            <>
+              {window.utilization.toFixed(0)}% · {timeRemaining.formatted} remaining{' '}
+            </>
+          ) : (
+            <>No session active </>
+          )}
           <span className="text-base">{status.emoji}</span>
         </p>
       </div>
