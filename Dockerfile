@@ -40,7 +40,8 @@ COPY --from=web-builder /app/web/dist ./web/dist
 
 # Copy entrypoint script
 COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+COPY tailscale-startup.sh /tailscale-startup.sh
+RUN chmod +x /docker-entrypoint.sh /tailscale-startup.sh
 
 # Create data directory
 RUN mkdir -p /data
